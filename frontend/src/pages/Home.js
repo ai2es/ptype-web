@@ -39,7 +39,7 @@ const Home = () => {
     const [overlayState, setOverlayState] = useState({
         hrrr_t: {
             visible: false,
-            label: "2m Temperature",
+            label: "2 m Temperature",
             dir: "hrrr_t",
             prefix: "hrrr",
             varname: "t",
@@ -50,7 +50,7 @@ const Home = () => {
         },
         hrrr_td: {
             visible: false,
-            label: "2m Dewpoint",
+            label: "2 m Dewpoint",
             dir: "hrrr_td",
             prefix: "hrrr",
             varname: "td",
@@ -61,7 +61,7 @@ const Home = () => {
         },
         hrrr_wb: {
             visible: false,
-            label: "2m Wetbulb",
+            label: "2 m Wetbulb",
             dir: "hrrr_wb",
             prefix: "hrrr",
             varname: "wb",
@@ -72,7 +72,7 @@ const Home = () => {
         },
         hrrr_u10: {
             visible: false,
-            label: "10m U-wind Component",
+            label: "10 m U-wind Component",
             dir: "hrrr_u10",
             prefix: "hrrr",
             varname: "u10",
@@ -83,7 +83,7 @@ const Home = () => {
         },
         hrrr_v10: {
             visible: false,
-            label: "10m V-wind Component",
+            label: "10 m V-wind Component",
             dir: "hrrr_v10",
             prefix: "hrrr",
             varname: "v10",
@@ -105,7 +105,7 @@ const Home = () => {
         },
         hrrr_rain: {
             visible: false,
-            label: "crain",
+            label: "HRRR Rain",
             dir: "hrrr_rain",
             prefix: "hrrr",
             varname: "hrrr_rain",
@@ -116,7 +116,7 @@ const Home = () => {
         },
         hrrr_snow: {
             visible: false,
-            label: "csnow",
+            label: "HRRR Snow",
             dir: "hrrr_snow",
             prefix: "hrrr",
             varname: "hrrr_snow",
@@ -127,7 +127,7 @@ const Home = () => {
         },
         hrrr_icep: {
             visible: false,
-            label: "cicep",
+            label: "HRRR Ice Pellets",
             dir: "hrrr_icep",
             prefix: "hrrr",
             varname: "hrrr_icep",
@@ -138,7 +138,7 @@ const Home = () => {
         },
         hrrr_frzr: {
             visible: false,
-            label: "cfrzr",
+            label: "HRRR Freezing Rain",
             dir: "hrrr_frzr",
             prefix: "hrrr",
             varname: "hrrr_frzr",
@@ -149,7 +149,7 @@ const Home = () => {
         },
         evi_uncertainty: {
             visible: false,
-            label: "Uncertainty",
+            label: "Epistemic Uncertainty",
             dir: "evi_uncertainty",
             prefix: "evi",
             varname: "uncertainty",
