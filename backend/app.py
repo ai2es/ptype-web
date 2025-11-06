@@ -1,3 +1,5 @@
+import os
+os.environ["KERAS_BACKEND"] = "torch"
 from flask import Flask, render_template,request,jsonify
 import xarray as xr
 import json
