@@ -531,12 +531,15 @@ const Home = () => {
                         <div id="mainbox">
                             <div id="metrics-display">
                                 <ul style={{ listStyleType: 'none', paddingLeft: '5px', paddingRight: '5px', marginLeft:'0px' }}>
-                                    <li>Upper Nose Height AGL: {metrics?.upper_nose_height_agl || 'N/A'}</li>
-                                    <li>Lower Nose Height AGL: {metrics?.lower_nose_height_agl || 'N/A'}</li>
-                                    <li>Warm Nose Depth (m): {metrics?.warm_nose_depth_m || 'N/A'}</li>
-                                    <li>Cold Layer Depth (m): {metrics?.cold_layer_depth_m || 'N/A'}</li>
-                                    <li>Warm Nose Area: {metrics?.warm_nose_area || 'N/A'}</li>
-                                    <li>Cold Layer Area: {metrics?.cold_layer_area || 'N/A'}</li>
+                                    <li>Freezing Energy (J/kg): {metrics?.cold_area || 'N/A'}</li>
+                                    <li>Melting Energy (J/kg): {metrics?.warm_area || 'N/A'}</li>
+                                    <li>Freeze Thickness (m): {metrics?.cold_thickness || 'N/A'}</li>
+                                    <li>Melt Thickness (m): {metrics?.warm_thickness || 'N/A'}</li>
+                                    <li>Upper Crossing (m AGL): {metrics?.highest_crossing || 'N/A'}</li>
+                                    <li>Lower Crossing (m AGL): {metrics?.lowest_crossing || 'N/A'}</li>
+                                    <li>Min Freeze Layer Temp (C): {metrics?.min_cold || 'N/A'}</li>
+                                    <li>Max Melt Layer Temp (C): {metrics?.max_warm || 'N/A'}</li>
+                                    <li>Surface Temperature (C): {metrics?.surface_temp || 'N/A'}</li>
                                 </ul>
                             </div>
                             <label id="rhlock">
