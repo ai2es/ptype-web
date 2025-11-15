@@ -1,3 +1,5 @@
+import os
+os.environ["KERAS_BACKEND"] = "torch"
 from flask import Flask, render_template,request,jsonify
 import xarray as xr
 import json
@@ -20,6 +22,7 @@ model = load_model("ptype_model_20240909.keras")
 scaler = load_scaler("ptype_scaler_20240909.json") 
 groups = scaler.groups_
 input_features = [x for y in groups for x in y]
+heights = np.arange(0, 5250, 250)
 
 # Retrieve profile and predictions for chosen lat/lon + date/time
 @app.route('/getCSV',methods=['GET','POST'])
@@ -69,7 +72,7 @@ def getCSV():
         mydatasub = mydata.isel(time=0, x=y, y=x)
 
         # Calculate skew-T stats
-        metrics = calc_profile_metrics(treturn)
+        metrics = calc_sounding_stats(treturn, heights)
 
         mydata.close()
 
@@ -109,7 +112,7 @@ def modSounding():
         frzr = probs[3]
 
         # Calculate skew-T stats
-        metrics = calc_profile_metrics(np.array(temp))
+        metrics = calc_sounding_stats(np.array(temp), heights)
 
         # Return new predictions
         return jsonify({"message": "Data received", "rain": rain.tolist(), "snow": snow.tolist(), "icep": icep.tolist(), "frzr": frzr.tolist(), "uncertainty":uncertainty.tolist(), "metrics":metrics})  # Return a JSON response
@@ -154,56 +157,78 @@ def retrieveValue():
         return jsonify({"message": "Data received", "rain": rain.tolist(), "snow": snow.tolist(), "icep": icep.tolist(), "frzr": frzr.tolist(), "uncertainty": uncertainty.tolist()})
 
 # Calculate skew-T stats
-def calc_profile_metrics(x, profile_var='t_h', resolution=250):
-    """ Given a vertical temperature profile, return area energy using the  
-    Bourgouin area method estimated with the trapezoidal method. 
+def add_zero_crossings(profile, heights):
+    pre_crossing_level = np.argwhere((np.diff(np.sign(profile)) != 0) * 1).flatten()
+    post_crossing_level = pre_crossing_level + 1
+    indices = []
+    crossings_m = []
+    for pre, post in zip(pre_crossing_level, post_crossing_level):
+        xp = profile[pre:post + 1]
+        fp = heights[pre:post + 1]
+        if xp[0] > xp[1]:
+            xp = xp[::-1]
+            fp = fp[::-1]
+        crossings_m.append(np.interp(0, xp, fp))
+        indices.append(post)
+    profile = np.insert(profile, indices, 0)
+    heights = np.insert(heights, indices, crossings_m)
 
-    Args:
-        ds (xr.Dataset): xarray dataset of the vertical profile of a single spatial point
-        profile_var (str): The name of the variable to use for calculations
-        resolution (int): Vertical spatial resolution of profile in meters. 
-    Returns:
-        Dict: Dictionary of statistics for elevated cold / warm layers
-    """
-    hgts = np.array([0,250,500,750,1000,1250,1500,1750,2000,2250,2500,2750,3000,3250,3500,3750,4000,4250,4500,4750,5000])
+    return profile, heights
 
-    metrics = {}
-    warm = np.argwhere(x > 0).squeeze()    
 
-    # Check for warm nose
-    if warm.size == 0:
-        metrics['upper_nose_height_agl'] = 'N/A'
-        metrics['lower_nose_height_agl'] = 'N/A'
-        metrics['warm_nose_depth_m'] = 'N/A'
-        metrics['warm_nose_area'] = 'N/A'
-        metrics['cold_layer_depth_m'] = 'N/A'
-        metrics['cold_layer_area'] = 'N/A'
-    else:
-        cold = np.argwhere(np.where(x < 0)[0] < warm.min()).squeeze()
-        if cold.size == 0:
-            metrics['upper_nose_height_agl'] = 'N/A'
-            metrics['lower_nose_height_agl'] = 'N/A'
-            metrics['warm_nose_depth_m'] = 'N/A'
-            metrics['warm_nose_area'] = 'N/A'
-            metrics['cold_layer_depth_m'] = 'N/A'
-            metrics['cold_layer_area'] = 'N/A' 
-        else:
-            print(warm)
-            top_nose = warm.max()
-            bottom_nose = warm.min()
-            warm_nose_depth = (top_nose - bottom_nose) * resolution
-            metrics['upper_nose_height_agl'] = str(hgts[top_nose])
-            metrics['lower_nose_height_agl'] = str(hgts[bottom_nose])
-            metrics['warm_nose_depth_m'] = str(int(warm_nose_depth))
-            metrics['warm_nose_area'] = str(int(np.abs(np.trapz(x[warm], dx=len(warm) * resolution))))
-            top_cold = cold.max()
-            bottom_cold = cold.min()
-            cold_layer_depth = str(int((top_cold - bottom_cold) * resolution))
-            metrics['cold_layer_depth_m'] = str(int(cold_layer_depth))
-            metrics['cold_layer_area'] = str(int(np.abs(np.trapz(x[cold], dx=len(cold) * resolution))))
+def calc_sounding_stats(profile, height_interp):
+    FREEZING_K = 273.15
+    GRAVITY = 9.81
 
+    cold_area, warm_area = [], []
+    low_i, cold_thickness, warm_thickness = 0, 0, 0
+    surface = profile[0]
+    profile, heights = add_zero_crossings(profile, height_interp)
+    try:
+        upper_bound_index = np.argwhere(
+            profile == 0).max() + 1  # get index of highest crossing where we no longer care about
+        lower_bound_index = np.argwhere(profile == 0).min()
+        highest_crossing = heights[upper_bound_index - 1]
+        lowest_crossing = heights[lower_bound_index]
+    except:
+        min_cold, max_warm, t_span, highest_crossing, lowest_crossing = np.nan, np.nan, np.nan, np.nan, np.nan
+        metrics = dict(cold_area=int(np.abs(np.sum(cold_area))),
+                       warm_area=int(np.sum(warm_area)),
+                       cold_thickness=int(cold_thickness),
+                       warm_thickness=int(warm_thickness),
+                       min_cold=round(float(min_cold), 3),
+                       max_warm=round(float(max_warm), 3),
+                       highest_crossing=round(float(highest_crossing), 3),
+                       lowest_crossing=round(float(lowest_crossing), 3),
+                       surface_temp=round(float(surface), 3))
+
+        return metrics
+
+    min_cold = profile[:upper_bound_index].min()
+    max_warm = profile[:upper_bound_index].max()
+    for i in range(upper_bound_index):
+        if (profile[i] == 0):
+
+            energy = np.trapezoid(GRAVITY * (profile[low_i:i + 1] / FREEZING_K), heights[low_i:i + 1])
+            if energy <= 0:
+                cold_area.append(energy)
+                cold_thickness += heights[i] - heights[low_i]
+            else:
+                warm_area.append(energy)
+                warm_thickness += heights[i] - heights[low_i]
+            low_i = i
+        metrics = dict(cold_area=int(np.abs(np.sum(cold_area))),
+                       warm_area=int(np.sum(warm_area)),
+                       cold_thickness=int(cold_thickness),
+                       warm_thickness=int(warm_thickness),
+                       min_cold=round(float(min_cold), 3),
+                       max_warm=round(float(max_warm), 3),
+                       highest_crossing=round(float(highest_crossing), 3),
+                       lowest_crossing=round(float(lowest_crossing), 3),
+                       surface_temp=round(float(surface), 3))
     return metrics
 
 
 if __name__ == "__main__":
     app.run(debug=True, threaded=True)
+
