@@ -4,6 +4,7 @@ from flask import Flask, render_template,request,jsonify
 import xarray as xr
 import json
 from mlguess.keras.models import CategoricalDNN
+from mlguess.keras.losses import evidential_cat_loss
 from keras.models import load_model
 from bridgescaler import load_scaler
 from datetime import datetime
@@ -18,7 +19,7 @@ with open('nn.json', 'r') as json_file:
     loaded_dict = json.load(json_file)
 
 # Load model and scaler
-model = load_model("ptype_model_20240909.keras")
+model = load_model("ptype_model_20240909.keras", custom_objects={"loss": evidential_cat_loss})
 scaler = load_scaler("ptype_scaler_20240909.json") 
 groups = scaler.groups_
 input_features = [x for y in groups for x in y]
@@ -52,7 +53,7 @@ def getCSV():
         (x,y) = eval(loaded_dict[coord])
 
         # Opens relevant netcdf and gets profile at calculated grid points
-        mydata = xr.open_dataset(f"data/MILES_ptype_hrrr_{datetime_object_formatted}.nc")
+        mydata = xr.open_dataset(f"data/MILES_ptype_hrrr_{datetime_object_formatted}.nc", engine="h5netcdf", decode_timedelta=True)
         agl = mydata['heightAboveGround'].values
         presreturn = mydata['isobaricInhPa_h'][0,:,x,y].values
         treturn = mydata['t_h'][0,:,x,y].values
@@ -145,7 +146,7 @@ def retrieveValue():
         (x,y) = eval(loaded_dict[coord])
 
         # Read probabilities from netcdf
-        mydata = xr.open_dataset(f"data/MILES_ptype_hrrr_{datetime_object_formatted}.nc")
+        mydata = xr.open_dataset(f"data/MILES_ptype_hrrr_{datetime_object_formatted}.nc", engine="h5netcdf", decode_timedelta=True)
         rain = mydata['ML_rain'][0,x,y].values
         snow = mydata['ML_snow'][0,x,y].values
         icep = mydata['ML_icep'][0,x,y].values
