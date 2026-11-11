@@ -35,6 +35,14 @@ button, select, input { font: inherit; color: inherit; }
 .header .logo-ncar { height: 40px; padding: 4px 8px; }
 .header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.01em; }
 .header .title p { font-size: 12px; color: #c9d6e6; }
+.header .title a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.header .title a:hover { color: #fff; }
+.about-button { margin-left: 8px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.6); background: transparent; color: #fff; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; vertical-align: 2px; }
+.about-button:hover { background: rgba(255, 255, 255, 0.18); }
+.dialog .citation { font-size: 12px; color: var(--gray-11); }
+.dialog .citation a, .link-list a { color: var(--ncar-blue); }
+.link-list { margin: 0 0 14px; padding-left: 18px; }
+.link-list li { margin-bottom: 4px; }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 
 /* Buttons */

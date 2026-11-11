@@ -158,7 +158,7 @@ export const FIELDS: FieldDef[] = [
       const msg = await fetch(':REFC:entire atmosphere:');
       return { kind: 'scalar', grid: msg.grid, values: msg.data };
     },
-    style: { type: 'raster', cmap: colormaps.nws_storm_clear_refl, opacity: 0.7, colorbar: { label: 'Composite reflectivity (dBZ)', ticks: [-20, 0, 20, 40, 60] } },
+    style: { type: 'raster', cmap: colormaps.nws_storm_clear_refl.withOpacity((lower) => (lower < 0 ? 0 : 1)), opacity: 0.7, colorbar: { label: 'Composite reflectivity (dBZ)', ticks: [0, 20, 40, 60] } },
   },
   {
     id: 'hrrr_ptype',

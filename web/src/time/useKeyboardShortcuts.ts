@@ -44,7 +44,7 @@ export function useKeyboardShortcuts() {
         case '[': speed(-1); break;
         case ']': speed(1); break;
         case '?': s.set({ helpOpen: !s.helpOpen }); break;
-        case 'Escape': s.setPlaying(false); s.set({ helpOpen: false }); break;
+        case 'Escape': s.setPlaying(false); s.set({ helpOpen: false, aboutOpen: false }); break;
         default: return;
       }
       e.preventDefault();

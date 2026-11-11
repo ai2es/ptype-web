@@ -43,6 +43,7 @@ export interface AppState {
   editSigma: number;
   lockRh: boolean;
   helpOpen: boolean;
+  aboutOpen: boolean;
 
   setManifest(m: Manifest | null, error?: string | null): void;
   setInit(init: InitIso): void;
@@ -85,6 +86,7 @@ export const useApp = create<AppState>((set, get) => ({
   editSigma: 2,
   lockRh: false,
   helpOpen: false,
+  aboutOpen: false,
 
   setManifest: (manifest, error = null) => set({ manifest, manifestError: error }),
   setInit: (init) => set((s) => ({ init, fhour: Math.min(s.fhour, maxFhour(init)) })),

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AboutDialog } from './layout/AboutDialog';
 import { Header } from './layout/Header';
 import { HelpDialog } from './layout/HelpDialog';
 import { LayerMenu } from './layout/LayerMenu';
@@ -43,6 +44,7 @@ export function App() {
         <SoundingPanel />
       </main>
       <HelpDialog />
+      <AboutDialog />
     </div>
   );
 }
