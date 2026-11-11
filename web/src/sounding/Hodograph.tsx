@@ -1,9 +1,9 @@
 import { useRef } from 'react';
 import { editWind, type EditOptions, type Profile } from './profile';
 
-const SIZE = 260;
+const SIZE = 150;
 const C = SIZE / 2;
-const R = C - 16;
+const R = C - 11;
 const KT = 1.94384;
 /** Height bands (m AGL) and their trace colours. */
 const BANDS = [
@@ -67,19 +67,19 @@ export function Hodograph({ profile, original, modified, edit, onEdit }: Props) 
 
   return (
     <div className="hodo-wrap">
-      <svg ref={svgRef} className="hodograph" viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label="Hodograph of wind from the surface to 5 km">
+      <svg ref={svgRef} className="hodograph" width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label="Hodograph of wind from the surface to 5 km">
         <defs>
-          <clipPath id="hodo-clip"><circle cx={C} cy={C} r={R + 10} /></clipPath>
+          <clipPath id="hodo-clip"><circle cx={C} cy={C} r={R + 8} /></clipPath>
         </defs>
-        <circle cx={C} cy={C} r={R + 10} className="plot-bg" />
+        <circle cx={C} cy={C} r={R + 8} className="plot-bg" />
         {rings.map((s) => (
           <g key={s}>
             <circle cx={C} cy={C} r={s * pxPerKt} className="ring" />
             <text className="axis-label" x={C + 3} y={C - s * pxPerKt - 2}>{s}</text>
           </g>
         ))}
-        <line className="ring" x1={C - R - 10} x2={C + R + 10} y1={C} y2={C} />
-        <line className="ring" x1={C} x2={C} y1={C - R - 10} y2={C + R + 10} />
+        <line className="ring" x1={C - R - 10} x2={C + R + 8} y1={C} y2={C} />
+        <line className="ring" x1={C} x2={C} y1={C - R - 10} y2={C + R + 8} />
         <g clipPath="url(#hodo-clip)">
           {modified && (
             <path
@@ -97,7 +97,7 @@ export function Hodograph({ profile, original, modified, edit, onEdit }: Props) 
               className="handle"
               cx={px(profile.u[k])}
               cy={py(profile.v[k])}
-              r={z % 1000 === 0 ? 4.5 : 3.5}
+              r={z % 1000 === 0 ? 3.8 : 2.8}
               fill={bandColor(z)}
               tabIndex={0}
               role="slider"
@@ -114,13 +114,12 @@ export function Hodograph({ profile, original, modified, edit, onEdit }: Props) 
             </circle>
           ))}
         </g>
-        <text className="axis-title" x={SIZE - 6} y={SIZE - 6} textAnchor="end">kt</text>
+        <text className="axis-title" x={SIZE - 2} y={SIZE - 3} textAnchor="end">kt</text>
       </svg>
       <ul className="hodo-key">
         {BANDS.map((b) => (
           <li key={b.label}><i style={{ background: b.color }} />{b.label}</li>
         ))}
-        <li className="hint">Rings every {ringStep} kt</li>
       </ul>
     </div>
   );

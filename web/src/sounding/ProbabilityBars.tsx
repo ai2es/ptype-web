@@ -26,7 +26,7 @@ export function ProbabilityBars({ prediction, original, modified }: Props) {
           <span className="prob-value" role="cell">{r.value === undefined ? '–' : `${Math.round(r.value * 100)}%`}</span>
         </div>
       ))}
-      {modified && <p className="hint">Tick marks show the original forecast.</p>}
+      <p className="hint">{modified ? 'Tick marks show the original forecast.' : '\u00a0'}</p>
     </div>
   );
 }

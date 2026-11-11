@@ -50,12 +50,9 @@ export function SoundingPanel() {
       {current && original && (
         <>
           <div className={`edit-bar${modified ? ' is-modified' : ''}`}>
-            <span className="edit-state">{modified ? 'Modified sounding' : 'Forecast sounding'}</span>
-            <button type="button" className="btn small" disabled={!modified} onClick={resetSounding}>Reset</button>
-          </div>
-          <div className="edit-options">
+            <span className="edit-state">{modified ? 'Modified' : 'Forecast'}</span>
             <label title="How many neighbouring levels move with the point you drag">
-              Drag affects
+              Drag
               <select value={editSigma} onChange={(e) => set({ editSigma: Number(e.target.value) })}>
                 <option value={0}>one level</option>
                 <option value={1}>a thin layer</option>
@@ -63,10 +60,11 @@ export function SoundingPanel() {
                 <option value={4}>a deep layer</option>
               </select>
             </label>
-            <label className="check">
+            <label title="Dewpoint follows temperature so relative humidity stays the same">
               <input type="checkbox" checked={lockRh} onChange={() => set({ lockRh: !lockRh })} />
-              <span>Keep relative humidity</span>
+              Keep RH
             </label>
+            <button type="button" className="btn small" disabled={!modified} onClick={resetSounding}>Reset</button>
           </div>
 
           <SkewT profile={current} original={original} modified={modified} edit={edit} onEdit={applyEdit} />
@@ -77,29 +75,34 @@ export function SoundingPanel() {
             <span className="key-cold">below 0 °C</span>
           </p>
 
-          <h3>Hodograph</h3>
-          <Hodograph profile={current} original={original} modified={modified} edit={edit} onEdit={applyEdit} />
-
-          <h3>Precipitation type probability</h3>
-          {sounding.modelError ? (
-            <p className="empty">{sounding.modelError}</p>
-          ) : (
-            <ProbabilityBars prediction={sounding.prediction} original={sounding.originalPrediction} modified={modified} />
-          )}
+          <div className="panel-row">
+            <section>
+              <h3>Hodograph</h3>
+              <Hodograph profile={current} original={original} modified={modified} edit={edit} onEdit={applyEdit} />
+            </section>
+            <section className="prob-col">
+              <h3>Precipitation type probability</h3>
+              {sounding.modelError ? (
+                <p className="empty">{sounding.modelError}</p>
+              ) : (
+                <ProbabilityBars prediction={sounding.prediction} original={sounding.originalPrediction} modified={modified} />
+              )}
+            </section>
+          </div>
 
           {stats && (
             <>
               <h3>Melting and refreezing layers</h3>
               <dl className="stats">
-                <dt>Melting energy</dt><dd>{fmt(stats.warmArea, 0, ' J/kg')}</dd>
-                <dt>Refreezing energy</dt><dd>{fmt(stats.coldArea, 0, ' J/kg')}</dd>
-                <dt>Melting layer depth</dt><dd>{fmt(stats.warmThickness, 0, ' m')}</dd>
-                <dt>Refreezing layer depth</dt><dd>{fmt(stats.coldThickness, 0, ' m')}</dd>
-                <dt>Highest 0 °C level</dt><dd>{fmt(stats.highestCrossing, 0, ' m')}</dd>
-                <dt>Lowest 0 °C level</dt><dd>{fmt(stats.lowestCrossing, 0, ' m')}</dd>
-                <dt>Warmest below top 0 °C</dt><dd>{fmt(stats.maxWarm, 1, ' °C')}</dd>
-                <dt>Coldest below top 0 °C</dt><dd>{fmt(stats.minCold, 1, ' °C')}</dd>
-                <dt>Surface temperature</dt><dd>{fmt(stats.surfaceTemp, 1, ' °C')}</dd>
+                <div><dt>Melting energy</dt><dd>{fmt(stats.warmArea, 0, ' J/kg')}</dd></div>
+                <div><dt>Refreezing energy</dt><dd>{fmt(stats.coldArea, 0, ' J/kg')}</dd></div>
+                <div><dt>Melting depth</dt><dd>{fmt(stats.warmThickness, 0, ' m')}</dd></div>
+                <div><dt>Refreezing depth</dt><dd>{fmt(stats.coldThickness, 0, ' m')}</dd></div>
+                <div><dt>Highest 0 °C level</dt><dd>{fmt(stats.highestCrossing, 0, ' m')}</dd></div>
+                <div><dt>Lowest 0 °C level</dt><dd>{fmt(stats.lowestCrossing, 0, ' m')}</dd></div>
+                <div><dt title="Warmest temperature below the highest 0 °C level">Warmest aloft</dt><dd>{fmt(stats.maxWarm, 1, ' °C')}</dd></div>
+                <div><dt title="Coldest temperature below the highest 0 °C level">Coldest below</dt><dd>{fmt(stats.minCold, 1, ' °C')}</dd></div>
+                <div><dt>Surface temperature</dt><dd>{fmt(stats.surfaceTemp, 1, ' °C')}</dd></div>
               </dl>
             </>
           )}

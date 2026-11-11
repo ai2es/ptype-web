@@ -1,11 +1,7 @@
-import { useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { editThermo, type EditOptions, type Profile } from './profile';
 
-const W = 400;
-const H = 430;
 const M = { top: 10, right: 54, bottom: 26, left: 40 };
-const w = W - M.left - M.right;
-const h = H - M.top - M.bottom;
 const P_BASE = 1050;
 const P_TOP = 450;
 const T_MIN = -35;
@@ -15,9 +11,15 @@ const ISOBARS = [1000, 925, 850, 700, 600, 500];
 const T_COLOR = '#c62828';
 const TD_COLOR = '#2e7d32';
 
-const yOf = (p: number) => (h * Math.log(p / P_TOP)) / Math.log(P_BASE / P_TOP);
-const xOf = (t: number, p: number) => ((t - T_MIN) / (T_MAX - T_MIN)) * w + (h - yOf(p)) * SKEW;
-const degPerPx = (T_MAX - T_MIN) / w;
+/** Plot geometry for an SVG of W × H pixels; the diagram is drawn at the size of its container. */
+function geometry(W: number, H: number) {
+  const w = Math.max(W - M.left - M.right, 60);
+  const h = Math.max(H - M.top - M.bottom, 60);
+  const yOf = (p: number) => (h * Math.log(p / P_TOP)) / Math.log(P_BASE / P_TOP);
+  const xOf = (t: number, p: number) => ((t - T_MIN) / (T_MAX - T_MIN)) * w + (h - yOf(p)) * SKEW;
+  return { W, H, w, h, yOf, xOf, degPerPx: (T_MAX - T_MIN) / w };
+}
+type Geometry = ReturnType<typeof geometry>;
 
 const line = (pts: [number, number][]) => pts.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
 
@@ -46,7 +48,7 @@ export function barbPath(speedKt: number): string {
 }
 
 /** Quads between the temperature trace and the 0 °C isotherm, split at each crossing. */
-function freezingAreas(p: Profile) {
+function freezingAreas(p: Profile, { xOf, yOf }: Geometry) {
   const pts: { t: number; p: number }[] = [];
   for (let k = 0; k < p.t.length; k++) {
     pts.push({ t: p.t[k], p: p.p[k] });
@@ -78,19 +80,33 @@ interface Props {
 }
 
 export function SkewT({ profile, original, modified, edit, onEdit }: Props) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const drag = useRef<{ start: Profile; which: 't' | 'td'; idx: number; x0: number; scale: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ W: 400, H: 430 });
+  useLayoutEffect(() => {
+    const el = wrapRef.current!;
+    const measure = () => {
+      const W = Math.round(el.clientWidth);
+      const H = Math.round(el.clientHeight);
+      if (W > 0 && H > 0) setSize((s) => (s.W === W && s.H === H ? s : { W, H }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const geom = useMemo(() => geometry(size.W, size.H), [size]);
+  const { W, H, w, h, xOf, yOf, degPerPx } = geom;
+  const drag = useRef<{ start: Profile; which: 't' | 'td'; idx: number; x0: number } | null>(null);
 
   const onDown = (which: 't' | 'td', idx: number) => (e: React.PointerEvent<SVGCircleElement>) => {
-    const rect = svgRef.current!.getBoundingClientRect();
-    drag.current = { start: profile, which, idx, x0: e.clientX, scale: W / rect.width };
+    drag.current = { start: profile, which, idx, x0: e.clientX };
     e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
   const onMove = (e: React.PointerEvent<SVGCircleElement>) => {
     const d = drag.current;
     if (!d) return;
-    onEdit(editThermo(d.start, d.which, d.idx, (e.clientX - d.x0) * d.scale * degPerPx, edit));
+    onEdit(editThermo(d.start, d.which, d.idx, (e.clientX - d.x0) * degPerPx, edit));
   };
   const onUp = () => {
     drag.current = null;
@@ -112,7 +128,8 @@ export function SkewT({ profile, original, modified, edit, onEdit }: Props) {
   const barbX = w + 30;
 
   return (
-    <svg ref={svgRef} className="skewt" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Skew-T log-p diagram of temperature and dewpoint with wind barbs">
+    <div ref={wrapRef} className="skewt-wrap">
+    <svg className="skewt" width={W} height={H} role="img" aria-label="Skew-T log-p diagram of temperature and dewpoint with wind barbs">
       <defs>
         <clipPath id="skewt-clip">
           <rect x={0} y={0} width={w} height={h} />
@@ -138,7 +155,7 @@ export function SkewT({ profile, original, modified, edit, onEdit }: Props) {
           {ISOBARS.map((p) => (
             <line key={p} className="isobar" x1={0} x2={w} y1={yOf(p)} y2={yOf(p)} />
           ))}
-          {freezingAreas(profile).map((a, k) => (
+          {freezingAreas(profile, geom).map((a, k) => (
             <path key={k} d={a.d} className={a.warm ? 'area-warm' : 'area-cold'} />
           ))}
           {modified && (
@@ -201,5 +218,6 @@ export function SkewT({ profile, original, modified, edit, onEdit }: Props) {
         )}
       </g>
     </svg>
+    </div>
   );
 }
