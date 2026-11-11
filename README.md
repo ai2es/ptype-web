@@ -58,3 +58,7 @@ I haven't had time to clean up the scripts used to generate the netcdf and geojs
 |            └── Home.js (Main React App)
 └── README.md
 </code></pre>
+
+## Static viewer (in progress)
+
+`web/` holds a rewrite of the site as a static page with no backend: see [web/README.md](web/README.md).
