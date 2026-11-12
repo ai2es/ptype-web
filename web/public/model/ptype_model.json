@@ -1,0 +1,59 @@
+{
+  "source_model": "ptype_model_20240909.keras",
+  "classes": [
+    "rain",
+    "snow",
+    "icep",
+    "frzr"
+  ],
+  "heights_m": [
+    0,
+    250,
+    500,
+    750,
+    1000,
+    1250,
+    1500,
+    1750,
+    2000,
+    2250,
+    2500,
+    2750,
+    3000,
+    3250,
+    3500,
+    3750,
+    4000,
+    4250,
+    4500,
+    4750,
+    5000
+  ],
+  "input_groups": [
+    "temperature_c",
+    "dewpoint_c",
+    "u_ms",
+    "v_ms"
+  ],
+  "input_layout": "concatenate(groups), each group ordered surface to 5000 m",
+  "scaler": {
+    "type": "GroupRobustScaler",
+    "center": [
+      -4.641082368941682,
+      -7.023700326116156,
+      9.559159960521102,
+      5.095222331132923
+    ],
+    "scale": [
+      13.790112363831089,
+      15.914745986167325,
+      15.313352318687704,
+      13.794443664100482
+    ]
+  },
+  "evidential": {
+    "alpha": "relu(output) + 1",
+    "prob": "alpha / sum(alpha)",
+    "u": "n_classes / sum(alpha)"
+  }
+}
