@@ -1,6 +1,7 @@
 # Builds web/ and publishes it to GitHub Pages.
-# In the repository settings, set Pages > Source to "GitHub Actions" and add
-# the data locations as repository variables (Settings > Secrets and variables
+# In the repository settings, set Pages > Source to "GitHub Actions".
+# Forecasts and soundings are read from the wwe-ptype bucket by default. To read
+# from somewhere else, add repository variables (Settings > Secrets and variables
 # > Actions > Variables): VITE_PTYPE_URL, VITE_SOUNDING_URL and, if the model
 # is hosted outside the site, VITE_MODEL_URL and VITE_MODEL_META_URL.
 name: Deploy web viewer

@@ -12,12 +12,20 @@ export interface Profile {
   v: number[];
   /** Pressure, hPa (used only to place levels on the skew-T). */
   p: number[];
+  /**
+   * Set when u and v are earth-relative (east, north): the angle alpha, in
+   * radians, by which the model grid's +y axis points east of true north at
+   * this cell. The network was trained on grid-relative winds, so they are
+   * rotated back by this angle before it runs. Absent when u and v are
+   * already grid-relative.
+   */
+  gridAngle?: number;
 }
 
 export type ProfileVar = 't' | 'td' | 'u' | 'v';
 
 export function cloneProfile(p: Profile): Profile {
-  return { heights: [...p.heights], t: [...p.t], td: [...p.td], u: [...p.u], v: [...p.v], p: [...p.p] };
+  return { heights: [...p.heights], t: [...p.t], td: [...p.td], u: [...p.u], v: [...p.v], p: [...p.p], gridAngle: p.gridAngle };
 }
 
 /** Saturation vapour pressure (hPa) from temperature (deg C), Magnus form. */

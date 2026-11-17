@@ -8,6 +8,8 @@ export interface ManifestEntry {
   forecastHours: number[];
   /** Store location relative to the ptype root (or an absolute URL). */
   store: string;
+  /** Sounding store of this run, relative to the sounding root (or an absolute URL). */
+  soundings: string;
 }
 
 export type Manifest = Map<InitIso, ManifestEntry>;
@@ -17,12 +19,19 @@ interface RawEntry {
   forecast_hours?: number[];
   max_forecast_hour?: number;
   store?: string;
+  soundings?: string;
 }
 
 /** Default store path for a run when the manifest does not give one. */
 export function defaultStorePath(init: InitIso): string {
   const day = init.slice(0, 10);
   return `${day.replace(/-/g, '/')}/hrrr_ptype_${day.replace(/-/g, '')}_${init.slice(11, 13)}00.zarr`;
+}
+
+/** Default sounding store path for a run when the manifest does not give one. */
+export function defaultSoundingPath(init: InitIso): string {
+  const day = init.slice(0, 10);
+  return `soundings/${day.replace(/-/g, '/')}/hrrr_soundings_${day.replace(/-/g, '')}_${init.slice(11, 13)}00.zarr`;
 }
 
 export function parseManifest(json: { inits?: RawEntry[] }): Manifest {
@@ -32,7 +41,12 @@ export function parseManifest(json: { inits?: RawEntry[] }): Manifest {
     const hours =
       raw.forecast_hours ??
       Array.from({ length: raw.max_forecast_hour ?? 18 }, (_, k) => k + 1);
-    out.set(init, { init, forecastHours: [...hours].sort((a, b) => a - b), store: raw.store ?? defaultStorePath(init) });
+    out.set(init, {
+      init,
+      forecastHours: [...hours].sort((a, b) => a - b),
+      store: raw.store ?? defaultStorePath(init),
+      soundings: raw.soundings ?? defaultSoundingPath(init),
+    });
   }
   return out;
 }
@@ -45,4 +59,11 @@ export async function fetchManifest(): Promise<Manifest> {
 
 export function storeUrl(entry: ManifestEntry): string {
   return /^https?:/.test(entry.store) ? entry.store : `${dataSources.ptypeRoot}/${entry.store}`;
+}
+
+export function soundingUrl(entry: ManifestEntry): string {
+  if (/^https?:/.test(entry.soundings)) return entry.soundings;
+  // A root that is itself a store serves every run (the bundled sample data).
+  const root = dataSources.soundingRoot;
+  return root.endsWith('.zarr') ? root : `${root}/${entry.soundings}`;
 }

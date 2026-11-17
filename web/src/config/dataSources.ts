@@ -13,14 +13,32 @@ function fromEnv(value: string | undefined, fallbackPath: string): string {
   return value && value.length > 0 ? value.replace(/\/$/, '') : siteUrl(fallbackPath);
 }
 
+/**
+ * The S3 bucket the forecasts are published to. Its policy only answers
+ * requests whose Referer is this site (or a localhost dev server), which the
+ * browser sends by itself; no key or signing is involved.
+ */
+export const FORECAST_BUCKET = 'https://wwe-ptype.s3.us-east-1.amazonaws.com';
+
+/** An override may be an absolute URL or a path inside the site (e.g. `sample-data/ptype`). */
+function remote(value: string | undefined, fallbackUrl: string): string {
+  if (!value || value.length === 0) return fallbackUrl;
+  const trimmed = value.replace(/\/$/, '');
+  return /^https?:/.test(trimmed) ? trimmed : siteUrl(trimmed);
+}
+
 export const dataSources = {
-  /** Root of the precipitation-type bucket; contains inits.json and one topozarr store per init. */
+  /** Holds inits.json and one topozarr store per run (paths in inits.json are relative to this). */
   get ptypeRoot() {
-    return fromEnv(env.VITE_PTYPE_URL, 'sample-data/ptype');
+    return remote(env.VITE_PTYPE_URL, `${FORECAST_BUCKET}/ptype`);
   },
-  /** Sounding Zarr store with a (init_time, forecast_hour, location, variable) array. */
-  get soundingStore() {
-    return fromEnv(env.VITE_SOUNDING_URL, 'sample-data/soundings.zarr');
+  /**
+   * Root that the `soundings` paths in inits.json are relative to: one sounding
+   * store per run. An override ending in `.zarr` is used as the single store
+   * for every run (the layout of the bundled sample data).
+   */
+  get soundingRoot() {
+    return remote(env.VITE_SOUNDING_URL, FORECAST_BUCKET);
   },
   /** ONNX export of the evidential network (S3 or a Hugging Face `resolve/main` URL). */
   get modelUrl() {

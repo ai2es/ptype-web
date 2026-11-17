@@ -15,9 +15,9 @@ npm install
 npm run dev
 ```
 
-Then open the URL Vite prints. Without sample data you still get the map and
-all HRRR fields for any run on NOAA's bucket; the precipitation-type layer and
-soundings need the stores below.
+Then open the URL Vite prints. The precipitation-type layer and soundings are
+read from the `wwe-ptype` S3 bucket by default; its access policy admits this
+site and `localhost` dev servers. HRRR fields come from NOAA's bucket for any run.
 
 ### Sample data
 
@@ -32,8 +32,10 @@ files to get an animation.
 
 ### Real data
 
-Copy `.env.example` to `.env.local` and set the bucket URLs. The layouts the
-site expects are in [docs/data-schema.md](docs/data-schema.md).
+Nothing needs to be configured to read the bucket. To read other stores, or the
+sample data (`VITE_PTYPE_URL=sample-data/ptype`,
+`VITE_SOUNDING_URL=sample-data/soundings.zarr`), copy `.env.example` to
+`.env.local`. The layouts the site expects are in [docs/data-schema.md](docs/data-schema.md).
 
 ## Commands
 
@@ -47,8 +49,8 @@ site expects are in [docs/data-schema.md](docs/data-schema.md).
 ## Deploying
 
 `.github/workflows/deploy-web.yml` builds and publishes to GitHub Pages on pushes
-to `main`. Set the data URLs as repository variables (see the comment at the top
-of that file). The build uses relative paths, so it works at
+to `main`. Data URLs default to the `wwe-ptype` bucket; repository variables
+override them (see the comment at the top of that file). The build uses relative paths, so it works at
 `https://<org>.github.io/ptype-web/` and at a custom domain without changes.
 
 ## Where things are

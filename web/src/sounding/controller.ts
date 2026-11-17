@@ -39,6 +39,7 @@ export function useSoundingLoader() {
   const point = useApp((s) => s.point);
   const init = useApp((s) => s.init);
   const fhour = useApp((s) => s.fhour);
+  const manifest = useApp((s) => s.manifest);
 
   useEffect(() => {
     const { setSounding, set } = useApp.getState();
@@ -47,9 +48,15 @@ export function useSoundingLoader() {
       set({ sounding: { status: 'idle' } });
       return;
     }
+    const entry = manifest?.get(init);
+    if (!entry) {
+      // Soundings exist only for runs that have precipitation-type forecasts.
+      set({ sounding: { status: manifest ? 'unavailable' : 'loading', message: manifest ? 'No sounding is stored for this run.' : undefined } });
+      return;
+    }
     // Keep showing the previous profile while the next one loads (smoother when animating).
     setSounding({ status: 'loading', message: undefined });
-    readSounding(init, fhour, point.lon, point.lat)
+    readSounding(entry, fhour, point.lon, point.lat)
       .then((res) => {
         if (gen !== loadGen) return;
         set({
@@ -72,5 +79,5 @@ export function useSoundingLoader() {
           },
         });
       });
-  }, [point, init, fhour]);
+  }, [point, init, fhour, manifest]);
 }
