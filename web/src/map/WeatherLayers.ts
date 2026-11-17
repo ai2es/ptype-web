@@ -10,7 +10,7 @@ import {
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { UNCERTAINTY_COLOR } from '../config/ptypeStyle';
 import type { HrrrGridInfo } from '../data/hrrr';
-import type { PtypeFrame } from '../data/ptype';
+import { uncertainty, type PtypeFrame } from '../data/ptype';
 import { splitContourLevels } from '../fields/gridops';
 import type { FieldData, FieldDef } from '../fields/registry';
 import type { GridDef } from '../geo/lambert';
@@ -121,6 +121,10 @@ class KeyedLayer {
     this.comps.set(key, comp);
   }
 
+  peek(key: string): Comp | undefined {
+    return this.comps.get(key);
+  }
+
   show(key: string | null) {
     this.active = key;
     this.map?.triggerRepaint();
@@ -147,9 +151,12 @@ interface Prebuilt {
   pending: Map<string, Promise<void>>;
 }
 
-/** Contours and wind barbs become GPU geometry, so their data can be dropped once a layer is built. */
-export function canPrebuild(def: FieldDef): boolean {
-  return def.style.type === 'contour' || def.style.type === 'barbs';
+/**
+ * Every HRRR field is drawn from graphics memory alone once built (lines, barbs, or a 16-bit texture), so its
+ * decoded values can be dropped. Kept as a function because callers ask per field.
+ */
+export function canPrebuild(_def: FieldDef): boolean {
+  return true;
 }
 
 export class WeatherLayers {
@@ -159,11 +166,40 @@ export class WeatherLayers {
   private keepPrefix: string | null = null;
 
   constructor(private readonly map: MapLibreMap) {
+    registerMemoryStats('prebuiltBreakdown', () => this.breakdown());
     registerMemoryStats('prebuilt', () => {
       const out: Record<string, { hours: number; runs: number }> = {};
       for (const [id, p] of this.prebuilt) out[id] = { hours: p.keys.size, runs: new Set([...p.keys].map((k) => k.split('|')[0])).size };
       return out;
     });
+  }
+
+  /** Graphics bytes of the newest prebuilt hour of each field, split into lines and labels (memory probe only). */
+  private breakdown(): Record<string, Record<string, number>> {
+    const bytes = (root: unknown): number => {
+      let total = 0;
+      const seen = new Set<unknown>();
+      const stack = [root];
+      while (stack.length > 0) {
+        const v = stack.pop() as Record<string, unknown> | null;
+        if (v === null || typeof v !== 'object' || seen.has(v) || ArrayBuffer.isView(v) || v instanceof Node) continue;
+        seen.add(v);
+        if (v.buffer instanceof WebGLBuffer && typeof v.n_verts === 'number') total += (v.n_verts as number) * (v.n_coords_per_vert as number) * 4;
+        else if (seen.size < 5000) stack.push(...(Array.isArray(v) ? v : Object.values(v)));
+      }
+      return Math.round(total / 1024);
+    };
+    const out: Record<string, Record<string, number>> = {};
+    for (const [id, p] of this.prebuilt) {
+      const key = [...p.keys].pop();
+      if (!key) continue;
+      out[id] = {};
+      for (const layer of p.layers) {
+        const c = layer.peek(key) as Record<string, unknown> | undefined;
+        if (c) out[id][`${layer.id.replace(`${id}-`, '')} kB`] = bytes(c.contours) + bytes(c.text_collection) + bytes((c.gl_elems as Record<string, unknown> | null)?.barb_billboards);
+      }
+    }
+    return out;
   }
 
   /** Draw or update an HRRR field; pass null to remove it. */
@@ -197,7 +233,8 @@ export class WeatherLayers {
     const payload = { frame, mask };
     await this.apply('uncertainty', projKey(frame.level.grid), payload, () => {
       const field = (p: typeof payload) => {
-        const values = p.mask ? p.frame.u.map((v, k) => (p.mask![k] ? v : 0)) : p.frame.u;
+        // Back to floats for contouring; only the frame on screen is ever expanded.
+        const values = Float32Array.from(p.frame.u, (code, k) => (p.mask && !p.mask[k] ? 0 : uncertainty(code)));
         return new RawScalarField(grid, values);
       };
       const contour = new Contour(field(payload), {
@@ -238,12 +275,12 @@ export class WeatherLayers {
     let p = this.prebuilt.get(def.id);
     if (!p) {
       const st = def.style;
-      const names = st.type === 'barbs' ? ['barbs'] : st.type === 'contour' && st.labels ? ['lines', 'labels'] : ['lines'];
+      const names = st.type === 'barbs' ? ['barbs'] : st.type !== 'contour' ? ['fill'] : st.labels ? ['lines', 'labels'] : ['lines'];
       const layers = names.map((n) => new KeyedLayer(`${def.id}-${n}`));
       // A second set of layers holds the in-between lines, which only draw once the map is zoomed in.
       if (st.type === 'contour' && st.coarseInterval) layers.push(...names.map((n) => new KeyedLayer(`${def.id}-fine-${n}`, st.fineMinZoom ?? 0)));
       p = { layers, keys: new Set(), pending: new Map() };
-      for (const layer of p.layers) this.map.addLayer(layer as never, ANCHOR_LINES);
+      for (const layer of p.layers) this.map.addLayer(layer as never, st.type === 'fill' || st.type === 'raster' ? ANCHOR_FILLS : ANCHOR_LINES);
       this.prebuilt.set(def.id, p);
     }
     const entry = p;
@@ -299,7 +336,15 @@ export class WeatherLayers {
         await build(style.levels ? { levels: style.levels } : { interval: style.interval ?? 1 }, entry.layers[0], style.labels ? entry.layers[1] : undefined);
       }
     } else {
-      throw new Error(`${def.id}: only contour and barb layers can be prebuilt`);
+      if (data.kind !== 'scalar') throw new Error(`${def.id}: expected a scalar field`);
+      // A filled field is one texture, 16-bit (see float16.ts): half the size of the decoded values it replaces.
+      const Fill = style.type === 'raster' ? Raster : ContourFill;
+      const fill = new Fill(new RawScalarField(grid, toFloat16(data.values)), { cmap: style.cmap, opacity: style.opacity });
+      const internals = fill as unknown as { fill_texture: unknown; field: unknown };
+      await entry.layers[0].add(key, fill as Comp);
+      await until(() => internals.fill_texture !== null);
+      // Drawing reads only the texture, so the values can go.
+      internals.field = null;
     }
     entry.keys.add(key);
     while (entry.keys.size > MAX_PREBUILT_HOURS) {
@@ -457,8 +502,17 @@ export class WeatherLayers {
   }
 }
 
+/**
+ * autumnplot-gl places labels for the map's closest zoom (10) and hides most of them further out, so nearly
+ * all of the label geometry is never seen at the zooms a 9 km contour is read at. Labels were 70% of a
+ * contour layer's graphics memory (4.9 of 6.2 MB an hour for sea level pressure). A quarter of the density
+ * spaces them as for zoom 8: the same labels up to there, sparser beyond.
+ */
+const LABEL_DENSITY = 0.25;
+
 function labelOpts(format: ((level: number) => string) | undefined, color: string) {
   return {
+    density: LABEL_DENSITY,
     font_face: LABEL_FONT,
     font_size: 12,
     text_color: color,

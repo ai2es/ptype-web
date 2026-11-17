@@ -7,7 +7,7 @@
  *
  * The mask is a byte per cell of one pyramid level, far smaller than the 7.6 MB
  * decoded field, so masks are cached here and the field is released once the
- * mask is built unless the reflectivity layer itself is on.
+ * mask is built. (The reflectivity layer keeps its own texture, not the field.)
  */
 import { fetchHrrrMessage, releaseHrrrMessage, type HrrrMessage } from '../data/hrrr';
 import type { PtypeLevel } from '../data/ptype';
@@ -28,15 +28,13 @@ export function maskFromReflectivity(level: PtypeLevel, refc: HrrrMessage): Uint
 }
 
 /**
- * Mask for one forecast hour on one pyramid level. `keepField` leaves the decoded
- * reflectivity in the message cache (pass true when the reflectivity layer is shown).
- * `fetch` lets the background loader count the download against its budget.
+ * Mask for one forecast hour on one pyramid level. `fetch` lets the background
+ * loader route the download through its own bookkeeping.
  */
 export function reflectivityMask(
   init: InitIso,
   fhour: number,
   level: PtypeLevel,
-  keepField: boolean,
   fetch: (search: string) => Promise<HrrrMessage> = (search) => fetchHrrrMessage(init, fhour, search),
 ): Promise<Uint8Array> {
   const key = `${init}|${fhour}|${level.path}|${level.grid.ni}x${level.grid.nj}`;
@@ -48,7 +46,7 @@ export function reflectivityMask(
   }
   const p = fetch(REFC_SEARCH).then((refc) => {
     const mask = maskFromReflectivity(level, refc);
-    if (!keepField) releaseHrrrMessage(init, fhour, REFC_SEARCH);
+    releaseHrrrMessage(init, fhour, REFC_SEARCH);
     if (masks.get(key) === p) maskBytes.set(key, mask.byteLength);
     return mask;
   });

@@ -77,12 +77,18 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
         continue;
       }
       setLayerStatus(id, 'loading');
+      const used: string[] = [];
       def
-        .load((search) => fetchHrrrMessage(init, fhour, search))
+        .load((search) => {
+          used.push(search);
+          return fetchHrrrMessage(init, fhour, search);
+        })
         .then(async (data) => {
           if (canPrebuild(def)) {
             // Build even if the user has moved on: the hour stays available for when they come back.
             await layers.prebuildField({ ...def, id: layerId }, hourKey, data);
+            // The layer now lives in graphics memory; the decoded messages behind it are not needed again.
+            for (const search of used) releaseHrrrMessage(init, fhour, search);
             if (gen !== fieldGen.current) return;
             layers.showPrebuilt(layerId, hourKey);
             setLayerStatus(id, 'ok');
@@ -136,7 +142,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       if (maskToPrecip) {
         try {
           // Composite reflectivity above 0 dBZ: unlike the categorical types, it is there at forecast hour 0.
-          mask = await reflectivityMask(init, fhour, frame.level, useApp.getState().activeFields.includes('refc'));
+          mask = await reflectivityMask(init, fhour, frame.level);
           setLayerStatus('ptype-mask', 'ok');
         } catch (err) {
           // Fall back to the store's own mask (HRRR categorical types) when it has one; otherwise the
@@ -238,11 +244,8 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
               else {
                 if (showBourgouin && store.hasBourgouin) jobs.push(readPtypeFrame(store, level, fh, 'BOURG'));
                 jobs.push(readPtypeFrame(store, level, fh));
-                // The mask is kept, not the reflectivity field, unless the reflectivity layer needs it anyway.
-                if (maskToPrecip) {
-                  const refcShown = fields.includes('refc');
-                  jobs.push(reflectivityMask(init, fh, store.levels[level], refcShown, refcShown ? keep : undefined).catch(() => undefined));
-                }
+                // Only the mask is kept; the reflectivity field is released once it is built.
+                if (maskToPrecip) jobs.push(reflectivityMask(init, fh, store.levels[level]).catch(() => undefined));
               }
             }
             await Promise.all(jobs);

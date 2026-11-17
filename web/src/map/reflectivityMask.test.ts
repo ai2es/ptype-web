@@ -40,9 +40,9 @@ describe('releaseMasksExcept', () => {
   it('keeps only the selected run', async () => {
     const { level, refc } = setup(3, 2, 1, [-10, 0, 0.5, 35, NaN, -0.1]);
     const fetch = () => Promise.resolve(refc);
-    await reflectivityMask('2023-12-26T00:00Z', 1, level, true, fetch);
-    await reflectivityMask('2023-12-26T00:00Z', 2, level, true, fetch);
-    await reflectivityMask('2023-12-26T06:00Z', 1, level, true, fetch);
+    await reflectivityMask('2023-12-26T00:00Z', 1, level, fetch);
+    await reflectivityMask('2023-12-26T00:00Z', 2, level, fetch);
+    await reflectivityMask('2023-12-26T06:00Z', 1, level, fetch);
     expect(maskCacheStats()).toMatchObject({ masks: 3, runs: 2 });
     releaseMasksExcept('2023-12-26T06:00Z');
     expect(maskCacheStats()).toMatchObject({ masks: 1, runs: 1 });

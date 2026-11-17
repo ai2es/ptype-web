@@ -33,12 +33,52 @@ export interface PtypeStore {
  */
 export type PtypeSource = 'ML' | 'BOURG';
 
+/**
+ * Frames are kept quantized: 32-bit floats made a 48-hour run of frames the largest thing in memory (467 MB
+ * at the level used for the national view). A probability is stored as a byte in steps of 1/254 and the
+ * uncertainty as 16 bits, 6 bytes a cell where there were 20. The map shades probability in steps of 10%
+ * and the readout shows whole percent, so nothing visible changes. The top code of each type marks missing.
+ */
+export const PROB_SCALE = 254;
+const PROB_MISSING = 255;
+const U_SCALE = 65534;
+const U_MISSING = 65535;
+
+export function quantizeProbability(values: ArrayLike<number>): Uint8Array {
+  const out = new Uint8Array(values.length);
+  for (let k = 0; k < out.length; k++) {
+    const v = values[k];
+    out[k] = Number.isNaN(v) ? PROB_MISSING : Math.round(Math.min(Math.max(v, 0), 1) * PROB_SCALE);
+  }
+  return out;
+}
+
+export function quantizeUncertainty(values: ArrayLike<number>): Uint16Array {
+  const out = new Uint16Array(values.length);
+  for (let k = 0; k < out.length; k++) {
+    const v = values[k];
+    out[k] = Number.isNaN(v) ? U_MISSING : Math.round(Math.min(Math.max(v, 0), 1) * U_SCALE);
+  }
+  return out;
+}
+
+/** Probability (0 to 1) from its stored byte; NaN where missing. */
+export function probability(code: number): number {
+  return code === PROB_MISSING ? NaN : code / PROB_SCALE;
+}
+
+/** Uncertainty (0 to 1) from its stored value; NaN where missing. */
+export function uncertainty(code: number): number {
+  return code === U_MISSING ? NaN : code / U_SCALE;
+}
+
 /** One forecast hour of one pyramid level. All arrays are row-major from the south-west corner. */
 export interface PtypeFrame {
   level: PtypeLevel;
-  probs: Record<PtypeClass, Float32Array>;
-  /** Evidential uncertainty; empty for Bourgouin frames, which have none. */
-  u: Float32Array;
+  /** Probability of each class as a byte: see `PROB_SCALE` and `probability`. */
+  probs: Record<PtypeClass, Uint8Array>;
+  /** Evidential uncertainty as 16 bits (`uncertainty`); empty for Bourgouin frames, which have none. */
+  u: Uint16Array;
   /** 1 where the HRRR has precipitation, when the store carries that field. */
   mask?: Uint8Array;
 }
@@ -111,13 +151,13 @@ async function readMask(store: PtypeStore, level: PtypeLevel, fhIndex: number): 
 const frames = new Map<string, Promise<PtypeFrame>>();
 const frameSizes = new Map<string, number>();
 /**
- * Frames are cached by size, not count: one hour is about 2 MB at the coarsest
- * pyramid level and 40 MB at the native 3 km grid.
+ * Frames are cached by size, not count: one hour is about 0.7 MB at the coarsest
+ * pyramid level and 13 MB at the native 3 km grid.
  */
 const MAX_FRAME_BYTES = (isLowMemoryDevice() ? 96 : 512) * 1024 * 1024;
 
 function frameSize(level: PtypeLevel, withMask: boolean): number {
-  return level.grid.ni * level.grid.nj * (5 * 4 + (withMask ? 1 : 0));
+  return level.grid.ni * level.grid.nj * (4 + 2 + (withMask ? 1 : 0));
 }
 
 const frameKey = (store: PtypeStore, levelIndex: number, fhour: number, source: PtypeSource) =>
@@ -153,7 +193,12 @@ export function readPtypeFrame(store: PtypeStore, levelIndex: number, fhour: num
       [...PTYPE_CLASSES.map((c) => `${source}_${c}`), ...(source === 'ML' ? ['ML_u'] : [])].map((v) => readVar(store, level, v, fhIndex)),
     ),
     store.hasMask ? readMask(store, level, fhIndex) : undefined,
-  ]).then(([[rain, snow, icep, frzr, u], mask]) => ({ level, probs: { rain, snow, icep, frzr }, u: u ?? new Float32Array(0), mask }));
+  ]).then(([[rain, snow, icep, frzr, u], mask]) => ({
+    level,
+    probs: { rain: quantizeProbability(rain), snow: quantizeProbability(snow), icep: quantizeProbability(icep), frzr: quantizeProbability(frzr) },
+    u: u ? quantizeUncertainty(u) : new Uint16Array(0),
+    mask,
+  }));
   const drop = (k: string) => {
     frames.delete(k);
     frameSizes.delete(k);

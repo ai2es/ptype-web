@@ -41,16 +41,13 @@ sample data (`VITE_PTYPE_URL=sample-data/ptype`,
 
 With "Preload run" ticked in the time bar (the default), the layers that are switched on are loaded for every
 forecast hour of the selected run in the background, nearest hours first, two hours at a time. The thin bar
-under the slider shows which hours are in memory. Decoded HRRR fields are about 7.6 MB each, so the caches are
-capped (about 80 fields and 512 MB of precipitation-type frames on a desktop); a long run with several fields
-stops at "memory limit" and carries on from wherever you move to. The logic is in `src/data/prefetch.ts`.
+under the slider shows which hours are in memory. Each hour is kept as finished layers on the graphics card and as
+quantized precipitation-type frames (see Memory below); the caches are capped (64 hours per layer and 512 MB
+of frames on a desktop), and a run that does not fit stops at "memory limit" and carries on from wherever you
+move to. The logic is in `src/data/prefetch.ts`.
 
-Contour and wind-barb layers are kept as one finished layer per forecast hour (`prebuildField` in
-`src/map/WeatherLayers.ts`), and the decoded GRIB data behind them is released once the layer is built, so they
-do not count against that limit. This moves the memory to the graphics card instead of removing it: measured on
-a 48-hour run, mean sea level pressure took at most about 4 MB of line geometry per hour and 2 m temperature
-5.8 MB (7.1 MB before its smoothing was widened from 4 to 6 grid points), against 7.6 MB for the decoded field. Up to 64 hours per field are kept. Filled and raster layers
-still need their values and are loaded as before.
+Every HRRR layer is kept as one finished layer per forecast hour (`prebuildField` in
+`src/map/WeatherLayers.ts`), and the decoded GRIB data behind it is released once the layer is built.
 
 ## Memory
 
@@ -69,7 +66,17 @@ a 48-hour run and then selecting three other runs in turn:
 | Old runs kept (before) | 371 MB fields, 467 MB frames, 438 MB graphics buffers | 465 MB, 505 MB, 525 MB; preload of each new run stopped at "memory limit" after 0 to 3 hours |
 | Old runs released | the same | 371 MB, 467 MB, 434 MB; each new run preloaded all 48 hours; 1,325 MB of buffers deleted in total |
 
-Within one run nothing is released early: the caches are sized to hold a run (see above).
+Within one run, memory is kept down by holding each thing in its smallest drawable form. Measured the same
+way for one preloaded 48-hour run with those three layers:
+
+| | Before | After | How |
+|---|---|---|---|
+| Decoded HRRR fields | 371 MB | 0 MB | every layer, rasters included, is prebuilt and its field released; the mask keeps only its bytes |
+| Precipitation-type frames | 467 MB | 156 MB | probabilities stored as bytes (steps of 1/254), uncertainty as 16 bits (`src/data/ptype.ts`) |
+| Graphics buffers (lines, labels) | 440 MB | 240 MB | contour labels at a quarter of the density (`LABEL_DENSITY`): they were 70% of a contour layer |
+| Graphics textures | 15 MB | 190 MB | the reflectivity raster now lives here as 16-bit textures, half its decoded size |
+| Masks | 22 MB | 22 MB | |
+| Total | 1,315 MB | 608 MB | |
 
 ## Phones and tablets
 
