@@ -183,3 +183,24 @@ export function chooseLevel(store: PtypeStore, zoom: number, lat: number, pixels
   });
   return best;
 }
+
+/**
+ * Forget every frame and open store except those of `keepUrl` (the selected run's store), so
+ * the previous run's frames (2 to 40 MB each) can be garbage collected as soon as the run changes.
+ */
+export function releasePtypeExcept(keepUrl: string | null): void {
+  for (const key of [...frames.keys()]) {
+    if (keepUrl !== null && key.startsWith(`${keepUrl}|`)) continue;
+    frames.delete(key);
+    frameSizes.delete(key);
+  }
+  for (const url of [...stores.keys()]) if (url !== keepUrl) stores.delete(url);
+}
+
+/** What the caches hold: for the memory probe (`?memdebug`). */
+export function ptypeCacheStats() {
+  let bytes = 0;
+  for (const n of frameSizes.values()) bytes += n;
+  const runs = new Set([...frames.keys()].map((k) => k.split('|')[0]));
+  return { frames: frames.size, framesMB: Math.round(bytes / 104857.6) / 10, stores: stores.size, runs: runs.size };
+}

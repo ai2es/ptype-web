@@ -15,6 +15,7 @@ import { splitContourLevels } from '../fields/gridops';
 import type { FieldData, FieldDef } from '../fields/registry';
 import type { GridDef } from '../geo/lambert';
 import { isLowMemoryDevice } from '../config/device';
+import { registerMemoryStats } from '../debug/memory';
 import { toFloat16 } from './float16';
 import { ANCHOR_FILLS, ANCHOR_LINES, LABEL_FONT } from './style';
 import { PTYPE_CMAP, dominantField } from './ptypeField';
@@ -25,6 +26,7 @@ type AnyGrid = LambertGrid;
 interface Slot {
   key: string;
   layerIds: string[];
+  comps: Comp[];
   update(data: unknown): Promise<void>;
 }
 
@@ -42,6 +44,46 @@ async function until(ready: () => boolean, timeoutMs = 20000): Promise<void> {
   while (!ready()) {
     if (performance.now() - started > timeoutMs) throw new Error('Timed out building a map layer');
     await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
+/**
+ * Delete the graphics-card buffers and textures a plot component owns.
+ *
+ * autumnplot-gl never deletes them itself: it relies on the browser freeing them
+ * when the JavaScript handles are garbage collected, and the collector cannot see
+ * how much graphics memory a handle stands for, so it is in no hurry. Measured
+ * with the `?memdebug` probe: a 48-hour run of two contour fields held 477 MB of
+ * buffers and none of it had been freed after switching run twice.
+ *
+ * Only the parts a component owns outright are walked for handles: contour lines,
+ * label text, fill and wind textures. Fills and barbs also hold vertex buffers that
+ * belong to the grid and are shared with every other component on it; those are
+ * reached through `gl_elems` and are deliberately left alone.
+ */
+function disposeGl(comp: unknown, gl: WebGLRenderingContext): void {
+  const c = comp as Record<string, unknown> & { gl_elems?: { barb_billboards?: Record<string, unknown> & { gl_elems?: Record<string, unknown> } } | null };
+  const billboards = c.gl_elems?.barb_billboards;
+  const roots = [c.contours, c.text_collection, c.fill_texture, c.mask_texture, billboards?.wind_textures, billboards?.gl_elems?.texture, billboards?.gl_elems?.geom_vertices];
+  const maxAttribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
+  const seen = new Set<unknown>();
+  const stack = roots.map((value) => ({ value, depth: 0 }));
+  while (stack.length > 0) {
+    const { value, depth } = stack.pop()!;
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    if (value instanceof WebGLBuffer) {
+      // Deleting a buffer detaches it from any vertex attribute it feeds but leaves the attribute enabled,
+      // and the next draw call then fails ("no buffer is bound to enabled attribute"). Disable those first.
+      for (let i = 0; i < maxAttribs; i++) {
+        if (gl.getVertexAttrib(i, gl.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING) === value) gl.disableVertexAttribArray(i);
+      }
+      gl.deleteBuffer(value);
+    }
+    else if (value instanceof WebGLTexture) gl.deleteTexture(value);
+    // Typed arrays have no handles inside; the context and DOM nodes are not the component's.
+    else if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value === gl || value instanceof Node) continue;
+    else if (depth < 6) for (const child of Array.isArray(value) ? value : Object.values(value)) stack.push({ value: child, depth: depth + 1 });
   }
 }
 
@@ -84,9 +126,17 @@ class KeyedLayer {
     this.map?.triggerRepaint();
   }
 
+  /** Forget one key and free its graphics memory. */
   drop(key: string) {
+    const comp = this.comps.get(key);
     this.comps.delete(key);
     if (this.active === key) this.active = null;
+    if (comp && this.gl) disposeGl(comp, this.gl);
+  }
+
+  /** Forget every key (the layer is being removed). */
+  dropAll() {
+    for (const key of [...this.comps.keys()]) this.drop(key);
   }
 }
 
@@ -106,8 +156,15 @@ export class WeatherLayers {
   private readonly slots = new Map<string, Slot>();
   private readonly grids = new Map<string, AnyGrid>();
   private readonly prebuilt = new Map<string, Prebuilt>();
+  private keepPrefix: string | null = null;
 
-  constructor(private readonly map: MapLibreMap) {}
+  constructor(private readonly map: MapLibreMap) {
+    registerMemoryStats('prebuilt', () => {
+      const out: Record<string, { hours: number; runs: number }> = {};
+      for (const [id, p] of this.prebuilt) out[id] = { hours: p.keys.size, runs: new Set([...p.keys].map((k) => k.split('|')[0])).size };
+      return out;
+    });
+  }
 
   /** Draw or update an HRRR field; pass null to remove it. */
   async setField(def: FieldDef, data: FieldData | null): Promise<void> {
@@ -155,8 +212,11 @@ export class WeatherLayers {
           { id: 'uncertainty-labels', comp: labels as Comp, anchor: ANCHOR_LINES },
         ],
         update: async (p) => {
+          // updateField builds new lines and labels and abandons the old ones without deleting them.
+          const old = { contours: (contour as unknown as { contours: unknown }).contours, text_collection: (labels as unknown as { text_collection: unknown }).text_collection };
           await contour.updateField(field(p as typeof payload));
           await labels.updateField();
+          disposeGl(old, this.map.painter.context.gl as WebGLRenderingContext);
         },
       };
     });
@@ -247,6 +307,25 @@ export class WeatherLayers {
       entry.keys.delete(oldest);
       for (const layer of entry.layers) layer.drop(oldest);
     }
+    // A build can finish after the user has moved to another run; do not let it bring the old run back.
+    if (this.keepPrefix !== null && !key.startsWith(this.keepPrefix)) this.dropPrebuilt(entry, key);
+  }
+
+  private dropPrebuilt(entry: Prebuilt, key: string): void {
+    entry.keys.delete(key);
+    for (const layer of entry.layers) layer.drop(key);
+  }
+
+  /**
+   * Keep only the prebuilt hours whose key starts with `prefix` (the selected run) and free the rest,
+   * including any that are still being built. Pass null to stop filtering.
+   */
+  keepOnlyPrebuilt(prefix: string | null): void {
+    this.keepPrefix = prefix;
+    if (prefix === null) return;
+    for (const entry of this.prebuilt.values()) {
+      for (const key of [...entry.keys]) if (!key.startsWith(prefix)) this.dropPrebuilt(entry, key);
+    }
   }
 
   /** Show a prebuilt hour of a field. False if it has not been built. */
@@ -263,12 +342,17 @@ export class WeatherLayers {
   remove(id: string): void {
     const pre = this.prebuilt.get(id);
     if (pre) {
-      for (const layer of pre.layers) if (this.map.getLayer(layer.id)) this.map.removeLayer(layer.id);
+      for (const layer of pre.layers) {
+        layer.dropAll();
+        if (this.map.getLayer(layer.id)) this.map.removeLayer(layer.id);
+      }
       this.prebuilt.delete(id);
     }
     const slot = this.slots.get(id);
     if (!slot) return;
     for (const layerId of slot.layerIds) if (this.map.getLayer(layerId)) this.map.removeLayer(layerId);
+    const gl = this.map.painter.context.gl as WebGLRenderingContext;
+    for (const comp of slot.comps) disposeGl(comp, gl);
     this.slots.delete(id);
   }
 
@@ -294,7 +378,7 @@ export class WeatherLayers {
       // PlotLayer implements MapLibre's custom layer interface.
       this.map.addLayer(new PlotLayer(c.id, c.comp) as never, c.anchor);
     }
-    this.slots.set(id, { key, layerIds: built.components.map((c) => c.id), update: built.update });
+    this.slots.set(id, { key, layerIds: built.components.map((c) => c.id), comps: built.components.map((c) => c.comp), update: built.update });
   }
 
   private buildField(def: FieldDef, grid: AnyGrid, first: FieldData) {

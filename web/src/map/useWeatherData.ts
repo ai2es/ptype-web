@@ -1,14 +1,15 @@
 /** Loads the data for the selected time and hands it to the map layers. */
 import { useEffect, useRef, useState } from 'react';
-import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity, releaseHrrrMessage } from '../data/hrrr';
+import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity, releaseHrrrExcept, releaseHrrrMessage } from '../data/hrrr';
 import { storeUrl } from '../data/manifest';
 import { prefetchOrder, startPrefetch, stopPrefetch } from '../data/prefetch';
-import { chooseLevel, frameCacheRoom, hasPtypeFrame, openPtypeStore, readPtypeFrame } from '../data/ptype';
+import { chooseLevel, frameCacheRoom, hasPtypeFrame, openPtypeStore, readPtypeFrame, releasePtypeExcept } from '../data/ptype';
+import { keepOldRuns } from '../debug/memory';
 import { FIELD_BY_ID } from '../fields/registry';
 import { maxFhour, useApp } from '../state/store';
 import type { InitIso } from '../time/times';
 import { setHoverFrame } from './hoverData';
-import { reflectivityMask } from './reflectivityMask';
+import { reflectivityMask, releaseMasksExcept } from './reflectivityMask';
 import { canPrebuild, type WeatherLayers } from './WeatherLayers';
 
 function statusFor(err: unknown) {
@@ -36,6 +37,20 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
   const ptypeOpacity = useApp((s) => s.ptypeOpacity);
   const playing = useApp((s) => s.playing);
   const setLayerStatus = useApp((s) => s.setLayerStatus);
+
+  // One run at a time ---------------------------------------------------------
+  // Selecting another run lets go of everything loaded for the previous one, so it can be garbage collected
+  // (and its graphics buffers deleted) straight away. Without this the old run sat in the caches until pushed
+  // out piecemeal, and preloading the new run stopped at "memory limit" after a few hours. This effect comes
+  // first so that it runs before the ones below start loading the new run.
+  useEffect(() => {
+    if (!init || keepOldRuns) return;
+    const entry = manifest?.get(init);
+    releaseHrrrExcept(init);
+    releasePtypeExcept(entry ? storeUrl(entry) : null);
+    releaseMasksExcept(init);
+    layers?.keepOnlyPrebuilt(`${init}|`);
+  }, [layers, init, manifest]);
 
   // HRRR fields ------------------------------------------------------------
   const fieldGen = useRef(0);

@@ -6,7 +6,7 @@ import { Lambert } from '../geo/lambert';
 // ptypeField builds a colour map with autumnplot-gl, which only exists in the browser bundle.
 vi.mock('../vendor/apgl', () => ({ ColorMap: class {} }));
 
-import { maskFromReflectivity } from './reflectivityMask';
+import { maskCacheStats, maskFromReflectivity, reflectivityMask, releaseMasksExcept } from './reflectivityMask';
 
 /** A small Lambert grid and a reflectivity message on the same cells, or on cells `factor` times finer. */
 function setup(ni: number, nj: number, factor: number, dbz: number[]) {
@@ -33,5 +33,18 @@ describe('maskFromReflectivity', () => {
     // 4 x 2 fine cells -> 2 x 1 coarse cells; only the right-hand block has an echo.
     const { level, refc } = setup(2, 1, 2, [-10, -10, -10, -10, -10, -10, -10, 20]);
     expect(Array.from(maskFromReflectivity(level, refc))).toEqual([0, 1]);
+  });
+});
+
+describe('releaseMasksExcept', () => {
+  it('keeps only the selected run', async () => {
+    const { level, refc } = setup(3, 2, 1, [-10, 0, 0.5, 35, NaN, -0.1]);
+    const fetch = () => Promise.resolve(refc);
+    await reflectivityMask('2023-12-26T00:00Z', 1, level, true, fetch);
+    await reflectivityMask('2023-12-26T00:00Z', 2, level, true, fetch);
+    await reflectivityMask('2023-12-26T06:00Z', 1, level, true, fetch);
+    expect(maskCacheStats()).toMatchObject({ masks: 3, runs: 2 });
+    releaseMasksExcept('2023-12-26T06:00Z');
+    expect(maskCacheStats()).toMatchObject({ masks: 1, runs: 1 });
   });
 });

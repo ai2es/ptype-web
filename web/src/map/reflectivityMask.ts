@@ -21,6 +21,7 @@ export const REFC_THRESHOLD_DBZ = 0;
 /** A full-resolution mask is 1.9 MB; this covers two 48-hour runs at that size in the worst case. */
 const MAX_MASKS = 100;
 const masks = new Map<string, Promise<Uint8Array>>();
+const maskBytes = new Map<string, number>();
 
 export function maskFromReflectivity(level: PtypeLevel, refc: HrrrMessage): Uint8Array {
   return precipMask(level.grid, [refc], REFC_THRESHOLD_DBZ);
@@ -48,10 +49,26 @@ export function reflectivityMask(
   const p = fetch(REFC_SEARCH).then((refc) => {
     const mask = maskFromReflectivity(level, refc);
     if (!keepField) releaseHrrrMessage(init, fhour, REFC_SEARCH);
+    if (masks.get(key) === p) maskBytes.set(key, mask.byteLength);
     return mask;
   });
   p.catch(() => masks.delete(key));
   masks.set(key, p);
   if (masks.size > MAX_MASKS) masks.delete(masks.keys().next().value!);
   return p;
+}
+
+/** Forget the masks of every run but `init`. */
+export function releaseMasksExcept(init: InitIso | null): void {
+  for (const key of [...masks.keys()]) if (init === null || !key.startsWith(`${init}|`)) masks.delete(key);
+}
+
+/** What the cache holds: for the memory probe (`?memdebug`). */
+export function maskCacheStats() {
+  let bytes = 0;
+  for (const key of [...maskBytes.keys()]) {
+    if (masks.has(key)) bytes += maskBytes.get(key)!;
+    else maskBytes.delete(key);
+  }
+  return { masks: masks.size, masksMB: Math.round(bytes / 104857.6) / 10, runs: new Set([...masks.keys()].map((k) => k.split('|')[0])).size };
 }

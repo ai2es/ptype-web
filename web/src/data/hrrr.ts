@@ -28,6 +28,8 @@ export class HrrrUnavailable extends Error {}
 
 const inventories = new Map<string, Promise<Grib2Inventory>>();
 const messages = new Map<string, Promise<HrrrMessage>>();
+/** Decoded bytes of each cached message, filled in as downloads finish (for the memory probe). */
+const messageBytes = new Map<string, number>();
 /**
  * Each decoded CONUS field is about 7.6 MB. The cache is sized so that a whole
  * run of a couple of fields can be held for animation (see data/prefetch.ts):
@@ -95,7 +97,7 @@ export function fetchHrrrMessage(init: InitIso, fhour: number, search: string): 
     return hit;
   }
   const p = download(url, search);
-  p.catch(() => messages.delete(key));
+  p.then((m) => messages.get(key) === p && messageBytes.set(key, m.data.byteLength)).catch(() => messages.delete(key));
   messages.set(key, p);
   if (messages.size > MAX_MESSAGES) messages.delete(messages.keys().next().value!);
   return p;
@@ -106,6 +108,18 @@ export function releaseHrrrMessage(init: InitIso, fhour: number, search: string)
   messages.delete(`${hrrrGribUrl(init, fhour)}|${search}`);
 }
 
+/**
+ * Forget everything that does not belong to `init`: decoded messages (about 7.6 MB each) and file
+ * inventories. Called when the user selects another run, so the old run's fields can be garbage
+ * collected at once instead of waiting to be pushed out one by one.
+ */
+export function releaseHrrrExcept(init: InitIso | null): void {
+  // Every file of a run shares this prefix; the forecast hour comes after it.
+  const keep = init === null ? null : hrrrGribUrl(init, 0).replace(/\d+\.grib2$/, '');
+  for (const key of [...messages.keys()]) if (keep === null || !key.startsWith(keep)) messages.delete(key);
+  for (const url of [...inventories.keys()]) if (keep === null || !url.startsWith(keep)) inventories.delete(url);
+}
+
 /** True when the run's file for this forecast hour exists on the bucket. */
 export async function hrrrAvailable(init: InitIso, fhour: number): Promise<boolean> {
   try {
@@ -114,4 +128,15 @@ export async function hrrrAvailable(init: InitIso, fhour: number): Promise<boole
   } catch {
     return false;
   }
+}
+
+/** What the caches hold: for the memory probe (`?memdebug`). */
+export function hrrrCacheStats() {
+  let bytes = 0;
+  for (const key of [...messageBytes.keys()]) {
+    if (messages.has(key)) bytes += messageBytes.get(key)!;
+    else messageBytes.delete(key);
+  }
+  const runs = new Set([...messages.keys()].map((k) => k.split('/conus/')[0].slice(-8) + k.split('.t')[1]?.slice(0, 2)));
+  return { messages: messages.size, messagesMB: Math.round(bytes / 104857.6) / 10, inventories: inventories.size, runs: runs.size };
 }

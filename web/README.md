@@ -52,6 +52,25 @@ a 48-hour run, mean sea level pressure took at most about 4 MB of line geometry 
 5.8 MB (7.1 MB before its smoothing was widened from 4 to 6 grid points), against 7.6 MB for the decoded field. Up to 64 hours per field are kept. Filled and raster layers
 still need their values and are loaded as before.
 
+## Memory
+
+Everything the site holds is tied to the selected run. Selecting another run (`useWeatherData`, "One run at a
+time") drops the old run's decoded HRRR fields, precipitation-type frames, masks and prebuilt contour layers,
+and deletes the prebuilt layers' graphics buffers explicitly (`disposeGl` in `src/map/WeatherLayers.ts`):
+autumnplot-gl never deletes them, and the browser did not collect any on its own in testing.
+
+Open the site with `?memdebug` and call `ptypeMemory()` in the console to see what each cache and the graphics
+card hold (`src/debug/memory.ts`). `?memdebug=norelease` switches the run-change release off for comparison.
+Measured in headless WebKit with 2 m temperature, sea level pressure and composite reflectivity on, preloading
+a 48-hour run and then selecting three other runs in turn:
+
+| | First run | After the third change of run |
+|---|---|---|
+| Old runs kept (before) | 371 MB fields, 467 MB frames, 438 MB graphics buffers | 465 MB, 505 MB, 525 MB; preload of each new run stopped at "memory limit" after 0 to 3 hours |
+| Old runs released | the same | 371 MB, 467 MB, 434 MB; each new run preloaded all 48 hours; 1,325 MB of buffers deleted in total |
+
+Within one run nothing is released early: the caches are sized to hold a run (see above).
+
 ## Phones and tablets
 
 - Filled and raster layers and wind barbs are sent to the graphics card as 16-bit floats (`src/map/float16.ts`):
