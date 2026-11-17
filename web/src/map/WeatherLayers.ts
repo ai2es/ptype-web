@@ -10,11 +10,12 @@ import {
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { UNCERTAINTY_COLOR } from '../config/ptypeStyle';
 import type { HrrrGridInfo } from '../data/hrrr';
-import type { PtypeFrame } from '../data/ptype';
-import { splitContourLevels } from '../fields/gridops';
+import { uncertainty, type PtypeFrame } from '../data/ptype';
+import { smooth, splitContourLevels } from '../fields/gridops';
 import type { FieldData, FieldDef } from '../fields/registry';
-import type { GridDef } from '../geo/lambert';
+import { Lambert, type GridDef } from '../geo/lambert';
 import { isLowMemoryDevice } from '../config/device';
+import { registerMemoryStats } from '../debug/memory';
 import { toFloat16 } from './float16';
 import { ANCHOR_FILLS, ANCHOR_LINES, LABEL_FONT } from './style';
 import { PTYPE_CMAP, dominantField } from './ptypeField';
@@ -25,6 +26,7 @@ type AnyGrid = LambertGrid;
 interface Slot {
   key: string;
   layerIds: string[];
+  comps: Comp[];
   update(data: unknown): Promise<void>;
 }
 
@@ -42,6 +44,46 @@ async function until(ready: () => boolean, timeoutMs = 20000): Promise<void> {
   while (!ready()) {
     if (performance.now() - started > timeoutMs) throw new Error('Timed out building a map layer');
     await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
+/**
+ * Delete the graphics-card buffers and textures a plot component owns.
+ *
+ * autumnplot-gl never deletes them itself: it relies on the browser freeing them
+ * when the JavaScript handles are garbage collected, and the collector cannot see
+ * how much graphics memory a handle stands for, so it is in no hurry. Measured
+ * with the `?memdebug` probe: a 48-hour run of two contour fields held 477 MB of
+ * buffers and none of it had been freed after switching run twice.
+ *
+ * Only the parts a component owns outright are walked for handles: contour lines,
+ * label text, fill and wind textures. Fills and barbs also hold vertex buffers that
+ * belong to the grid and are shared with every other component on it; those are
+ * reached through `gl_elems` and are deliberately left alone.
+ */
+function disposeGl(comp: unknown, gl: WebGLRenderingContext): void {
+  const c = comp as Record<string, unknown> & { gl_elems?: { barb_billboards?: Record<string, unknown> & { gl_elems?: Record<string, unknown> } } | null };
+  const billboards = c.gl_elems?.barb_billboards;
+  const roots = [c.contours, c.text_collection, c.fill_texture, c.mask_texture, billboards?.wind_textures, billboards?.gl_elems?.texture, billboards?.gl_elems?.geom_vertices];
+  const maxAttribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
+  const seen = new Set<unknown>();
+  const stack = roots.map((value) => ({ value, depth: 0 }));
+  while (stack.length > 0) {
+    const { value, depth } = stack.pop()!;
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    if (value instanceof WebGLBuffer) {
+      // Deleting a buffer detaches it from any vertex attribute it feeds but leaves the attribute enabled,
+      // and the next draw call then fails ("no buffer is bound to enabled attribute"). Disable those first.
+      for (let i = 0; i < maxAttribs; i++) {
+        if (gl.getVertexAttrib(i, gl.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING) === value) gl.disableVertexAttribArray(i);
+      }
+      gl.deleteBuffer(value);
+    }
+    else if (value instanceof WebGLTexture) gl.deleteTexture(value);
+    // Typed arrays have no handles inside; the context and DOM nodes are not the component's.
+    else if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value === gl || value instanceof Node) continue;
+    else if (depth < 6) for (const child of Array.isArray(value) ? value : Object.values(value)) stack.push({ value: child, depth: depth + 1 });
   }
 }
 
@@ -79,14 +121,26 @@ class KeyedLayer {
     this.comps.set(key, comp);
   }
 
+  peek(key: string): Comp | undefined {
+    return this.comps.get(key);
+  }
+
   show(key: string | null) {
     this.active = key;
     this.map?.triggerRepaint();
   }
 
+  /** Forget one key and free its graphics memory. */
   drop(key: string) {
+    const comp = this.comps.get(key);
     this.comps.delete(key);
     if (this.active === key) this.active = null;
+    if (comp && this.gl) disposeGl(comp, this.gl);
+  }
+
+  /** Forget every key (the layer is being removed). */
+  dropAll() {
+    for (const key of [...this.comps.keys()]) this.drop(key);
   }
 }
 
@@ -97,17 +151,80 @@ interface Prebuilt {
   pending: Map<string, Promise<void>>;
 }
 
-/** Contours and wind barbs become GPU geometry, so their data can be dropped once a layer is built. */
-export function canPrebuild(def: FieldDef): boolean {
-  return def.style.type === 'contour' || def.style.type === 'barbs';
+/** Uncertainty is smoothed over about this distance (box blur radius), whatever the pyramid level. */
+const UNCERTAINTY_SMOOTH_M = 9000;
+
+/** Contours every 0.02, of which only every 0.1 is drawn until the map is zoomed in to a region. */
+const UNCERTAINTY_DEF: FieldDef = {
+  id: 'uncertainty',
+  label: 'Epistemic uncertainty',
+  group: 'Surface',
+  note: '',
+  swatch: UNCERTAINTY_COLOR,
+  load: () => Promise.reject(new Error('uncertainty comes from the precipitation-type store')),
+  style: {
+    type: 'contour',
+    color: UNCERTAINTY_COLOR,
+    interval: 0.02,
+    coarseInterval: 0.1,
+    fineMinZoom: 5.5,
+    lineWidth: (l) => 1 + 1.5 * l,
+    labels: true,
+    // One decimal for the 0.1 lines, two for the ones in between.
+    labelFormat: (l) => l.toFixed(Math.abs(l * 10 - Math.round(l * 10)) < 1e-6 ? 1 : 2),
+  },
+};
+
+/**
+ * Every HRRR field is drawn from graphics memory alone once built (lines, barbs, or a 16-bit texture), so its
+ * decoded values can be dropped. Kept as a function because callers ask per field.
+ */
+export function canPrebuild(_def: FieldDef): boolean {
+  return true;
 }
 
 export class WeatherLayers {
   private readonly slots = new Map<string, Slot>();
   private readonly grids = new Map<string, AnyGrid>();
   private readonly prebuilt = new Map<string, Prebuilt>();
+  private keepPrefix: string | null = null;
 
-  constructor(private readonly map: MapLibreMap) {}
+  constructor(private readonly map: MapLibreMap) {
+    registerMemoryStats('prebuiltBreakdown', () => this.breakdown());
+    registerMemoryStats('prebuilt', () => {
+      const out: Record<string, { hours: number; runs: number }> = {};
+      for (const [id, p] of this.prebuilt) out[id] = { hours: p.keys.size, runs: new Set([...p.keys].map((k) => k.split('|')[0])).size };
+      return out;
+    });
+  }
+
+  /** Graphics bytes of the newest prebuilt hour of each field, split into lines and labels (memory probe only). */
+  private breakdown(): Record<string, Record<string, number>> {
+    const bytes = (root: unknown): number => {
+      let total = 0;
+      const seen = new Set<unknown>();
+      const stack = [root];
+      while (stack.length > 0) {
+        const v = stack.pop() as Record<string, unknown> | null;
+        if (v === null || typeof v !== 'object' || seen.has(v) || ArrayBuffer.isView(v) || v instanceof Node) continue;
+        seen.add(v);
+        if (v.buffer instanceof WebGLBuffer && typeof v.n_verts === 'number') total += (v.n_verts as number) * (v.n_coords_per_vert as number) * 4;
+        else if (seen.size < 5000) stack.push(...(Array.isArray(v) ? v : Object.values(v)));
+      }
+      return Math.round(total / 1024);
+    };
+    const out: Record<string, Record<string, number>> = {};
+    for (const [id, p] of this.prebuilt) {
+      const key = [...p.keys].pop();
+      if (!key) continue;
+      out[id] = {};
+      for (const layer of p.layers) {
+        const c = layer.peek(key) as Record<string, unknown> | undefined;
+        if (c) out[id][`${layer.id.replace(`${id}-`, '')} kB`] = bytes(c.contours) + bytes(c.text_collection) + bytes((c.gl_elems as Record<string, unknown> | null)?.barb_billboards);
+      }
+    }
+    return out;
+  }
 
   /** Draw or update an HRRR field; pass null to remove it. */
   async setField(def: FieldDef, data: FieldData | null): Promise<void> {
@@ -133,33 +250,26 @@ export class WeatherLayers {
     });
   }
 
-  /** Draw or update contours of evidential uncertainty. */
-  async setUncertainty(frame: PtypeFrame | null, mask: Uint8Array | null): Promise<void> {
-    if (!frame) return this.remove('uncertainty');
-    const grid = this.projGrid(frame.level.grid);
-    const payload = { frame, mask };
-    await this.apply('uncertainty', projKey(frame.level.grid), payload, () => {
-      const field = (p: typeof payload) => {
-        const values = p.mask ? p.frame.u.map((v, k) => (p.mask![k] ? v : 0)) : p.frame.u;
-        return new RawScalarField(grid, values);
-      };
-      const contour = new Contour(field(payload), {
-        color: UNCERTAINTY_COLOR,
-        levels: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        line_width: (l) => 1 + 2 * l,
-      });
-      const labels = new ContourLabels(contour, labelOpts((l) => l.toFixed(1), UNCERTAINTY_COLOR));
-      return {
-        components: [
-          { id: 'uncertainty-lines', comp: contour as Comp, anchor: ANCHOR_LINES },
-          { id: 'uncertainty-labels', comp: labels as Comp, anchor: ANCHOR_LINES },
-        ],
-        update: async (p) => {
-          await contour.updateField(field(p as typeof payload));
-          await labels.updateField();
-        },
-      };
-    });
+  /**
+   * Draw contours of evidential uncertainty for one frame; pass null to remove them. `key` names the run,
+   * hour and pyramid level, so an hour already built is shown again without recontouring.
+   *
+   * The field is smoothed first (the network's uncertainty is noisy from cell to cell), then cut to the
+   * precipitation mask. Lines are every 0.1 at the national view and every 0.02 once zoomed in.
+   */
+  async setUncertainty(frame: PtypeFrame | null, mask: Uint8Array | null, key = ''): Promise<void> {
+    if (!frame) return this.remove(UNCERTAINTY_DEF.id);
+    if (this.showPrebuilt(UNCERTAINTY_DEF.id, key)) return;
+    const g = frame.level.grid;
+    // Back to floats for contouring; only frames that are drawn are ever expanded.
+    const raw = Float32Array.from(frame.u, uncertainty);
+    const values = smooth(raw, g.ni, g.nj, Math.max(1, Math.round(UNCERTAINTY_SMOOTH_M / g.dx)));
+    // Outside the mask there is nothing to contour: NaN ends the lines at the edge of the precipitation.
+    if (mask) for (let k = 0; k < values.length; k++) if (!mask[k]) values[k] = NaN;
+    const [llLon, llLat] = new Lambert(g).inverse(g.llX, g.llY);
+    const grid: HrrrGridInfo = { ni: g.ni, nj: g.nj, lon0: g.lon0, lat0: g.lat0, latStd: g.latStd, llLon, llLat, dx: g.dx, dy: g.dy };
+    await this.prebuildField(UNCERTAINTY_DEF, key, { kind: 'scalar', grid, values });
+    this.showPrebuilt(UNCERTAINTY_DEF.id, key);
   }
 
   /** True when the layer for this field and key (run and forecast hour) has been built, or is being built. */
@@ -178,12 +288,12 @@ export class WeatherLayers {
     let p = this.prebuilt.get(def.id);
     if (!p) {
       const st = def.style;
-      const names = st.type === 'barbs' ? ['barbs'] : st.type === 'contour' && st.labels ? ['lines', 'labels'] : ['lines'];
+      const names = st.type === 'barbs' ? ['barbs'] : st.type !== 'contour' ? ['fill'] : st.labels ? ['lines', 'labels'] : ['lines'];
       const layers = names.map((n) => new KeyedLayer(`${def.id}-${n}`));
       // A second set of layers holds the in-between lines, which only draw once the map is zoomed in.
       if (st.type === 'contour' && st.coarseInterval) layers.push(...names.map((n) => new KeyedLayer(`${def.id}-fine-${n}`, st.fineMinZoom ?? 0)));
       p = { layers, keys: new Set(), pending: new Map() };
-      for (const layer of p.layers) this.map.addLayer(layer as never, ANCHOR_LINES);
+      for (const layer of p.layers) this.map.addLayer(layer as never, st.type === 'fill' || st.type === 'raster' ? ANCHOR_FILLS : ANCHOR_LINES);
       this.prebuilt.set(def.id, p);
     }
     const entry = p;
@@ -239,13 +349,40 @@ export class WeatherLayers {
         await build(style.levels ? { levels: style.levels } : { interval: style.interval ?? 1 }, entry.layers[0], style.labels ? entry.layers[1] : undefined);
       }
     } else {
-      throw new Error(`${def.id}: only contour and barb layers can be prebuilt`);
+      if (data.kind !== 'scalar') throw new Error(`${def.id}: expected a scalar field`);
+      // A filled field is one texture, 16-bit (see float16.ts): half the size of the decoded values it replaces.
+      const Fill = style.type === 'raster' ? Raster : ContourFill;
+      const fill = new Fill(new RawScalarField(grid, toFloat16(data.values)), { cmap: style.cmap, opacity: style.opacity });
+      const internals = fill as unknown as { fill_texture: unknown; field: unknown };
+      await entry.layers[0].add(key, fill as Comp);
+      await until(() => internals.fill_texture !== null);
+      // Drawing reads only the texture, so the values can go.
+      internals.field = null;
     }
     entry.keys.add(key);
     while (entry.keys.size > MAX_PREBUILT_HOURS) {
       const oldest = entry.keys.values().next().value!;
       entry.keys.delete(oldest);
       for (const layer of entry.layers) layer.drop(oldest);
+    }
+    // A build can finish after the user has moved to another run; do not let it bring the old run back.
+    if (this.keepPrefix !== null && !key.startsWith(this.keepPrefix)) this.dropPrebuilt(entry, key);
+  }
+
+  private dropPrebuilt(entry: Prebuilt, key: string): void {
+    entry.keys.delete(key);
+    for (const layer of entry.layers) layer.drop(key);
+  }
+
+  /**
+   * Keep only the prebuilt hours whose key starts with `prefix` (the selected run) and free the rest,
+   * including any that are still being built. Pass null to stop filtering.
+   */
+  keepOnlyPrebuilt(prefix: string | null): void {
+    this.keepPrefix = prefix;
+    if (prefix === null) return;
+    for (const entry of this.prebuilt.values()) {
+      for (const key of [...entry.keys]) if (!key.startsWith(prefix)) this.dropPrebuilt(entry, key);
     }
   }
 
@@ -263,12 +400,17 @@ export class WeatherLayers {
   remove(id: string): void {
     const pre = this.prebuilt.get(id);
     if (pre) {
-      for (const layer of pre.layers) if (this.map.getLayer(layer.id)) this.map.removeLayer(layer.id);
+      for (const layer of pre.layers) {
+        layer.dropAll();
+        if (this.map.getLayer(layer.id)) this.map.removeLayer(layer.id);
+      }
       this.prebuilt.delete(id);
     }
     const slot = this.slots.get(id);
     if (!slot) return;
     for (const layerId of slot.layerIds) if (this.map.getLayer(layerId)) this.map.removeLayer(layerId);
+    const gl = this.map.painter.context.gl as WebGLRenderingContext;
+    for (const comp of slot.comps) disposeGl(comp, gl);
     this.slots.delete(id);
   }
 
@@ -294,7 +436,7 @@ export class WeatherLayers {
       // PlotLayer implements MapLibre's custom layer interface.
       this.map.addLayer(new PlotLayer(c.id, c.comp) as never, c.anchor);
     }
-    this.slots.set(id, { key, layerIds: built.components.map((c) => c.id), update: built.update });
+    this.slots.set(id, { key, layerIds: built.components.map((c) => c.id), comps: built.components.map((c) => c.comp), update: built.update });
   }
 
   private buildField(def: FieldDef, grid: AnyGrid, first: FieldData) {
@@ -373,8 +515,18 @@ export class WeatherLayers {
   }
 }
 
+/**
+ * autumnplot-gl places labels for the map's closest zoom (10) and hides most of them further out, so nearly
+ * all of the label geometry is never seen at the zooms a 9 km contour is read at. Labels were 70% of a
+ * contour layer's graphics memory (4.9 of 6.2 MB an hour for sea level pressure). Half the density
+ * spaces them as for zoom 9: the same labels up to there, and still about one per line across the window
+ * at zoom 10 (a quarter left most lines unlabelled there).
+ */
+const LABEL_DENSITY = 0.5;
+
 function labelOpts(format: ((level: number) => string) | undefined, color: string) {
   return {
+    density: LABEL_DENSITY,
     font_face: LABEL_FONT,
     font_size: 12,
     text_color: color,

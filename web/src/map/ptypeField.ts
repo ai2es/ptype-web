@@ -1,7 +1,7 @@
 /** Turns a ptype frame into the single raster field drawn on the map. */
 import { ColorMap } from '../vendor/apgl';
 import { PTYPE_STYLES } from '../config/ptypeStyle';
-import { PTYPE_CLASSES, type PtypeFrame } from '../data/ptype';
+import { PTYPE_CLASSES, probability, type PtypeFrame } from '../data/ptype';
 import type { HrrrMessage } from '../data/hrrr';
 import { Lambert, type GridDef } from '../geo/lambert';
 
@@ -36,13 +36,15 @@ export function dominantField(frame: PtypeFrame, mask: Uint8Array | null): Float
       continue;
     }
     let best = 0;
-    let bestP = arrays[0][k];
+    let bestCode = arrays[0][k];
     for (let c = 1; c < arrays.length; c++) {
-      if (arrays[c][k] > bestP) {
-        bestP = arrays[c][k];
+      if (arrays[c][k] > bestCode) {
+        bestCode = arrays[c][k];
         best = c;
       }
     }
+    // Missing is the largest code, so a cell with any missing class ends up missing.
+    const bestP = probability(bestCode);
     // The value is class + probability. It is stored as a 16-bit float for drawing, whose steps near 4 are
     // 1/512, so the probability is capped where rounding cannot carry it into the next class.
     // No type has any probability: possible for Bourgouin (its probabilities are independent), never for the network.

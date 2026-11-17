@@ -7,7 +7,7 @@
  *
  * The mask is a byte per cell of one pyramid level, far smaller than the 7.6 MB
  * decoded field, so masks are cached here and the field is released once the
- * mask is built unless the reflectivity layer itself is on.
+ * mask is built. (The reflectivity layer keeps its own texture, not the field.)
  */
 import { fetchHrrrMessage, releaseHrrrMessage, type HrrrMessage } from '../data/hrrr';
 import type { PtypeLevel } from '../data/ptype';
@@ -21,21 +21,20 @@ export const REFC_THRESHOLD_DBZ = 0;
 /** A full-resolution mask is 1.9 MB; this covers two 48-hour runs at that size in the worst case. */
 const MAX_MASKS = 100;
 const masks = new Map<string, Promise<Uint8Array>>();
+const maskBytes = new Map<string, number>();
 
 export function maskFromReflectivity(level: PtypeLevel, refc: HrrrMessage): Uint8Array {
   return precipMask(level.grid, [refc], REFC_THRESHOLD_DBZ);
 }
 
 /**
- * Mask for one forecast hour on one pyramid level. `keepField` leaves the decoded
- * reflectivity in the message cache (pass true when the reflectivity layer is shown).
- * `fetch` lets the background loader count the download against its budget.
+ * Mask for one forecast hour on one pyramid level. `fetch` lets the background
+ * loader route the download through its own bookkeeping.
  */
 export function reflectivityMask(
   init: InitIso,
   fhour: number,
   level: PtypeLevel,
-  keepField: boolean,
   fetch: (search: string) => Promise<HrrrMessage> = (search) => fetchHrrrMessage(init, fhour, search),
 ): Promise<Uint8Array> {
   const key = `${init}|${fhour}|${level.path}|${level.grid.ni}x${level.grid.nj}`;
@@ -47,11 +46,27 @@ export function reflectivityMask(
   }
   const p = fetch(REFC_SEARCH).then((refc) => {
     const mask = maskFromReflectivity(level, refc);
-    if (!keepField) releaseHrrrMessage(init, fhour, REFC_SEARCH);
+    releaseHrrrMessage(init, fhour, REFC_SEARCH);
+    if (masks.get(key) === p) maskBytes.set(key, mask.byteLength);
     return mask;
   });
   p.catch(() => masks.delete(key));
   masks.set(key, p);
   if (masks.size > MAX_MASKS) masks.delete(masks.keys().next().value!);
   return p;
+}
+
+/** Forget the masks of every run but `init`. */
+export function releaseMasksExcept(init: InitIso | null): void {
+  for (const key of [...masks.keys()]) if (init === null || !key.startsWith(`${init}|`)) masks.delete(key);
+}
+
+/** What the cache holds: for the memory probe (`?memdebug`). */
+export function maskCacheStats() {
+  let bytes = 0;
+  for (const key of [...maskBytes.keys()]) {
+    if (masks.has(key)) bytes += maskBytes.get(key)!;
+    else maskBytes.delete(key);
+  }
+  return { masks: masks.size, masksMB: Math.round(bytes / 104857.6) / 10, runs: new Set([...masks.keys()].map((k) => k.split('|')[0])).size };
 }
