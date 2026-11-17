@@ -45,6 +45,12 @@ const K = 273.15;
 /** Contoured fields are smoothed and thinned to every 3rd point (9 km) to keep contours clean and fast. */
 const CONTOUR_THIN = 3;
 
+/**
+ * Box-blur radius, in 3 km grid points, for temperature-like fields. Near-surface temperature follows the
+ * terrain closely, so it needs more smoothing than pressure or height to give readable contours.
+ */
+const TEMPERATURE_SMOOTH = 6;
+
 function contourField(msg: HrrrMessage, values: Float32Array, radius = 4): FieldData {
   const sm = smooth(values, msg.grid.ni, msg.grid.nj, radius);
   const t = thin(sm, msg.grid, CONTOUR_THIN);
@@ -63,7 +69,7 @@ function celsiusContour(id: string, label: string, group: FieldDef['group'], sea
     swatch: color,
     load: async (fetch) => {
       const msg = await fetch(search);
-      return contourField(msg, mapValues(msg.data, (v) => v - K));
+      return contourField(msg, mapValues(msg.data, (v) => v - K), TEMPERATURE_SMOOTH);
     },
     style: { type: 'contour', color, interval: 2, lineWidth: zeroBold, lineStyle: negDashed, labels: true },
   };
@@ -87,7 +93,7 @@ export const FIELDS: FieldDef[] = [
     swatch: '#0277bd',
     load: async (fetch) => {
       const [t, td] = await Promise.all([fetch(':TMP:2 m above ground:'), fetch(':DPT:2 m above ground:')]);
-      return contourField(t, combine(t.data, td.data, (a, b) => wetBulbStull(a - K, b - K)));
+      return contourField(t, combine(t.data, td.data, (a, b) => wetBulbStull(a - K, b - K)), TEMPERATURE_SMOOTH);
     },
     style: { type: 'contour', color: '#0277bd', interval: 2, lineWidth: zeroBold, lineStyle: negDashed, labels: true },
   },

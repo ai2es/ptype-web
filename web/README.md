@@ -49,7 +49,7 @@ Contour and wind-barb layers are kept as one finished layer per forecast hour (`
 `src/map/WeatherLayers.ts`), and the decoded GRIB data behind them is released once the layer is built, so they
 do not count against that limit. This moves the memory to the graphics card instead of removing it: measured on
 a 48-hour run, mean sea level pressure took at most about 4 MB of line geometry per hour and 2 m temperature
-about 7 MB, against 7.6 MB for the decoded field. Up to 64 hours per field are kept. Filled and raster layers
+5.8 MB (7.1 MB before its smoothing was widened from 4 to 6 grid points), against 7.6 MB for the decoded field. Up to 64 hours per field are kept. Filled and raster layers
 still need their values and are loaded as before.
 
 ## Commands
