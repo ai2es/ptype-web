@@ -65,6 +65,11 @@ Rows may run south to north or north to south; the sign of the y term in
 `spatial:transform` says which. Chunk so that one forecast hour of one level is
 a small number of chunks (topozarr's defaults do this).
 
+They also hold the revised Bourgouin diagnosis (Birk et al. 2021) as `BOURG_rain`, `BOURG_snow`, `BOURG_icep`,
+`BOURG_frzr` (independent probabilities, 0 to 1, which need not sum to 1) and `BOURG_class`. The "Revised Bourgouin
+method" layer draws the largest of the four, shaded by its value, in place of the network's layer; cells where all
+four are zero are left blank.
+
 Stores written by `ptype.hrrr_fast` also hold `precip_mask` (uint8, 1 where any HRRR categorical type is
 set) at every level, listed under the root attribute `hrrr_ptype.variables`. When it is there the site masks
 with it and does not download the four categorical fields from NOAA.

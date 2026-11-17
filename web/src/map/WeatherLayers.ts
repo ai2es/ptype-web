@@ -118,16 +118,16 @@ export class WeatherLayers {
   }
 
   /** Draw or update the dominant precipitation type raster. */
-  async setPtype(frame: PtypeFrame | null, mask: Uint8Array | null, opacity: number): Promise<void> {
-    if (!frame) return this.remove('ptype');
+  async setPtype(frame: PtypeFrame | null, mask: Uint8Array | null, opacity: number, id = 'ptype'): Promise<void> {
+    if (!frame) return this.remove(id);
     const grid = this.projGrid(frame.level.grid);
     const key = `${projKey(frame.level.grid)}|${opacity}`;
     const payload = { frame, mask };
-    await this.apply('ptype', key, payload, () => {
+    await this.apply(id, key, payload, () => {
       const field = (p: typeof payload) => new RawScalarField(grid, toFloat16(dominantField(p.frame, p.mask)));
       const raster = new Raster(field(payload), { cmap: PTYPE_CMAP, opacity });
       return {
-        components: [{ id: 'ptype-raster', comp: raster as Comp, anchor: ANCHOR_FILLS }],
+        components: [{ id: `${id}-raster`, comp: raster as Comp, anchor: ANCHOR_FILLS }],
         update: (p) => raster.updateField(field(p as typeof payload)),
       };
     });

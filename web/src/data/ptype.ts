@@ -22,12 +22,22 @@ export interface PtypeStore {
   forecastHours: number[];
   /** True when the store has the HRRR precipitation mask alongside the probabilities. */
   hasMask: boolean;
+  /** True when the store has the revised Bourgouin probabilities (BOURG_*). */
+  hasBourgouin: boolean;
 }
+
+/**
+ * Which diagnosis a frame holds: the evidential neural network, or the revised
+ * Bourgouin layer-energy method (Birk et al. 2021) computed from the same
+ * profiles. Bourgouin's four probabilities are independent and need not sum to 1.
+ */
+export type PtypeSource = 'ML' | 'BOURG';
 
 /** One forecast hour of one pyramid level. All arrays are row-major from the south-west corner. */
 export interface PtypeFrame {
   level: PtypeLevel;
   probs: Record<PtypeClass, Float32Array>;
+  /** Evidential uncertainty; empty for Bourgouin frames, which have none. */
   u: Float32Array;
   /** 1 where the HRRR has precipitation, when the store carries that field. */
   mask?: Uint8Array;
@@ -63,7 +73,7 @@ async function open(url: string): Promise<PtypeStore> {
   const fh = await zarr.get(fhArr);
   // Stores written by ptype.hrrr_fast list their variables; older ones have only the probabilities.
   const variables = (attrs.hrrr_ptype as { variables?: Record<string, unknown> } | undefined)?.variables;
-  return { url, group, levels, forecastHours: Array.from(fh.data as ArrayLike<number | bigint>, Number), hasMask: !!variables && 'precip_mask' in variables };
+  return { url, group, levels, forecastHours: Array.from(fh.data as ArrayLike<number | bigint>, Number), hasMask: !!variables && 'precip_mask' in variables, hasBourgouin: !!variables && 'BOURG_rain' in variables };
 }
 
 export function openPtypeStore(url: string): Promise<PtypeStore> {
@@ -110,6 +120,9 @@ function frameSize(level: PtypeLevel, withMask: boolean): number {
   return level.grid.ni * level.grid.nj * (5 * 4 + (withMask ? 1 : 0));
 }
 
+const frameKey = (store: PtypeStore, levelIndex: number, fhour: number, source: PtypeSource) =>
+  `${store.url}|${levelIndex}|${fhour}${source === 'ML' ? '' : `|${source}`}`;
+
 /** How many more frames of this level fit in the cache without dropping any. */
 export function frameCacheRoom(store: PtypeStore, levelIndex: number): number {
   let used = 0;
@@ -118,13 +131,13 @@ export function frameCacheRoom(store: PtypeStore, levelIndex: number): number {
 }
 
 /** True when this frame is already in memory (or on its way). */
-export function hasPtypeFrame(store: PtypeStore, levelIndex: number, fhour: number): boolean {
-  return frames.has(`${store.url}|${levelIndex}|${fhour}`);
+export function hasPtypeFrame(store: PtypeStore, levelIndex: number, fhour: number, source: PtypeSource = 'ML'): boolean {
+  return frames.has(frameKey(store, levelIndex, fhour, source));
 }
 
 /** Read one forecast hour at one pyramid level (cached). */
-export function readPtypeFrame(store: PtypeStore, levelIndex: number, fhour: number): Promise<PtypeFrame> {
-  const key = `${store.url}|${levelIndex}|${fhour}`;
+export function readPtypeFrame(store: PtypeStore, levelIndex: number, fhour: number, source: PtypeSource = 'ML'): Promise<PtypeFrame> {
+  const key = frameKey(store, levelIndex, fhour, source);
   const hit = frames.get(key);
   if (hit) {
     // Refresh recency, so the frame on screen is the last to be dropped.
@@ -136,9 +149,11 @@ export function readPtypeFrame(store: PtypeStore, levelIndex: number, fhour: num
   if (fhIndex < 0) return Promise.reject(new Error(`Forecast hour ${fhour} is not in the store`));
   const level = store.levels[levelIndex];
   const p = Promise.all([
-    Promise.all(['ML_rain', 'ML_snow', 'ML_icep', 'ML_frzr', 'ML_u'].map((v) => readVar(store, level, v, fhIndex))),
+    Promise.all(
+      [...PTYPE_CLASSES.map((c) => `${source}_${c}`), ...(source === 'ML' ? ['ML_u'] : [])].map((v) => readVar(store, level, v, fhIndex)),
+    ),
     store.hasMask ? readMask(store, level, fhIndex) : undefined,
-  ]).then(([[rain, snow, icep, frzr, u], mask]) => ({ level, probs: { rain, snow, icep, frzr }, u, mask }));
+  ]).then(([[rain, snow, icep, frzr, u], mask]) => ({ level, probs: { rain, snow, icep, frzr }, u: u ?? new Float32Array(0), mask }));
   const drop = (k: string) => {
     frames.delete(k);
     frameSizes.delete(k);

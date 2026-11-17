@@ -45,7 +45,7 @@ export function LayerMenu() {
       <section>
         <h3>Neural network forecast</h3>
         <label className="check">
-          <input type="checkbox" checked={s.showPtype} onChange={() => s.set({ showPtype: !s.showPtype })} />
+          <input type="checkbox" checked={s.showPtype} onChange={() => s.set({ showPtype: !s.showPtype, showBourgouin: s.showPtype ? s.showBourgouin : false })} />
           <span>Most likely precipitation type</span>
           <Status status={s.layerStatus.ptype} />
         </label>
@@ -68,6 +68,19 @@ export function LayerMenu() {
             aria-label="Precipitation type opacity"
           />
         </label>
+      </section>
+
+      <section>
+        <h3>Revised Bourgouin method</h3>
+        <label className="check">
+          <input type="checkbox" checked={s.showBourgouin} onChange={() => s.set({ showBourgouin: !s.showBourgouin, showPtype: s.showBourgouin ? s.showPtype : false })} />
+          <span>Most likely precipitation type</span>
+          <Status status={s.layerStatus.bourgouin} />
+        </label>
+        <p className="layer-note">
+          Layer-energy diagnosis (Birk et al. 2021) from the same HRRR profiles, for comparison. Shown in place of the
+          network&apos;s; the mask and opacity above apply to both.
+        </p>
       </section>
 
       {groups.map((group) => (

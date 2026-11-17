@@ -19,6 +19,14 @@ describe('dominant precipitation type as drawn', () => {
     }
   });
 
+  it('hides cells where no type has any probability, as Bourgouin can give', () => {
+    const zero = Float32Array.from([0, 0.4]);
+    const frame = { probs: { rain: zero, snow: Float32Array.from([0, 0.7]), icep: zero, frzr: zero }, u: new Float32Array(0) } as unknown as PtypeFrame;
+    const drawn = dominantField(frame, null);
+    expect(drawn[0]).toBe(-1);
+    expect(drawn[1]).toBeCloseTo(1.7, 5);
+  });
+
   it('hides masked cells', () => {
     const p = Float32Array.from([0.9]);
     const frame = { probs: { rain: p, snow: p, icep: p, frzr: p }, u: new Float32Array(1) } as unknown as PtypeFrame;
