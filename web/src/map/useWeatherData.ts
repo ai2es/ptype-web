@@ -1,13 +1,13 @@
 /** Loads the data for the selected time and hands it to the map layers. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity, releaseHrrrExcept, releaseHrrrMessage } from '../data/hrrr';
 import { storeUrl } from '../data/manifest';
 import { prefetchOrder, startPrefetch, stopPrefetch } from '../data/prefetch';
 import { chooseLevel, frameCacheRoom, hasPtypeFrame, openPtypeStore, readPtypeFrame, releasePtypeExcept } from '../data/ptype';
 import { keepOldRuns } from '../debug/memory';
 import { FIELD_BY_ID } from '../fields/registry';
-import { maxFhour, useApp } from '../state/store';
-import type { InitIso } from '../time/times';
+import { frameIndex, loopFrames, useApp } from '../state/store';
+import { validIso, type Frame, type KeepFrame } from '../time/trend';
 import { setHoverFrame } from './hoverData';
 import { reflectivityMask, releaseMasksExcept } from './reflectivityMask';
 import { canPrebuild, type WeatherLayers } from './WeatherLayers';
@@ -18,16 +18,20 @@ function statusFor(err: unknown) {
 }
 
 /** Warm the caches for the next frame so animation does not stall. */
-function preload(init: InitIso, fhour: number, fieldIds: string[]) {
-  if (fhour > maxFhour(init)) return;
+function preload({ init, fhour }: Frame, fieldIds: string[]) {
   for (const id of fieldIds) {
     FIELD_BY_ID.get(id)?.load((search) => fetchHrrrMessage(init, fhour, search)).catch(() => undefined);
   }
 }
 
 export function useWeatherData(layers: WeatherLayers | null, view: { zoom: number; lat: number }) {
+  const mode = useApp((s) => s.mode);
   const init = useApp((s) => s.init);
   const fhour = useApp((s) => s.fhour);
+  // The loop being stepped through: the hours of a run, or (trend mode) the runs valid at one time. It
+  // changes with the run or the valid time, not with every step.
+  const loopKey = !init ? null : mode === 'trend' ? `trend|${validIso(init, fhour)}` : `run|${init}`;
+  const loop = useMemo(() => loopFrames({ mode, init, fhour }), [loopKey]);
   const activeFields = useApp((s) => s.activeFields);
   const manifest = useApp((s) => s.manifest);
   const showPtype = useApp((s) => s.showPtype);
@@ -38,19 +42,26 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
   const playing = useApp((s) => s.playing);
   const setLayerStatus = useApp((s) => s.setLayerStatus);
 
-  // One run at a time ---------------------------------------------------------
-  // Selecting another run lets go of everything loaded for the previous one, so it can be garbage collected
-  // (and its graphics buffers deleted) straight away. Without this the old run sat in the caches until pushed
-  // out piecemeal, and preloading the new run stopped at "memory limit" after a few hours. This effect comes
-  // first so that it runs before the ones below start loading the new run.
+  // One loop at a time --------------------------------------------------------
+  // Selecting another run (or, in trend mode, another valid time) lets go of everything loaded for the
+  // previous one, so it can be garbage collected (and its graphics buffers deleted) straight away. Without
+  // this the old data sat in the caches until pushed out piecemeal, and preloading the new run stopped at
+  // "memory limit" after a few hours. A trend loop keeps one forecast hour of each of its runs; a run keeps
+  // all of its hours. This effect comes first so that it runs before the ones below start loading.
   useEffect(() => {
     if (!init || keepOldRuns) return;
-    const entry = manifest?.get(init);
-    releaseHrrrExcept(init);
-    releasePtypeExcept(entry ? storeUrl(entry) : null);
-    releaseMasksExcept(init);
-    layers?.keepOnlyPrebuilt(`${init}|`);
-  }, [layers, init, manifest]);
+    const keep: KeepFrame[] = mode === 'trend' ? loop : [{ init }];
+    releaseHrrrExcept(keep);
+    releasePtypeExcept(
+      keep.flatMap((k) => {
+        const entry = manifest?.get(k.init);
+        return entry ? [{ url: storeUrl(entry), fhour: k.fhour }] : [];
+      }),
+    );
+    releaseMasksExcept(keep);
+    layers?.keepOnlyPrebuilt(keep);
+    // `loop` and `mode` change only together with `loopKey`.
+  }, [layers, loopKey, manifest]);
 
   // HRRR fields ------------------------------------------------------------
   const fieldGen = useRef(0);
@@ -104,8 +115,12 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
           setLayerStatus(id, statusFor(err));
         });
     }
-    if (playing) preload(init, fhour + 1, activeFields);
-  }, [layers, init, fhour, activeFields, playing, setLayerStatus]);
+    if (playing) {
+      const frames = loopFrames({ mode, init, fhour });
+      const next = frames[(frameIndex(frames, { init, fhour }) + 1) % frames.length];
+      if (next) preload(next, activeFields);
+    }
+  }, [layers, mode, init, fhour, activeFields, playing, setLayerStatus]);
 
   // Precipitation type and uncertainty ----------------------------------------
   const ptypeGen = useRef(0);
@@ -180,8 +195,8 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
     });
   }, [layers, init, fhour, manifest, showPtype, showBourgouin, showUncertainty, maskToPrecip, ptypeOpacity, zoomBucket, latBucket, setLayerStatus]);
 
-  // The rest of the run, in the background -------------------------------------
-  // Deliberately not keyed on the forecast hour: stepping through the run must not restart the loading.
+  // The rest of the loop, in the background ------------------------------------
+  // Deliberately keyed on the loop, not on the frame: stepping through it must not restart the loading.
   const preloadRun = useApp((s) => s.preloadRun);
   const fieldKey = [...activeFields].sort().join(',');
   // When the run does not fit in memory, loading stops part way. If the user then moves to an hour that was
@@ -199,22 +214,30 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       set({ prefetch: null });
       return;
     }
-    const entry = manifest?.get(init);
     const fields = fieldKey ? fieldKey.split(',') : [];
-    const key = `${init}|${fieldKey}|${entry ? `${zoomBucket}/${latBucket}/${maskToPrecip}/${showBourgouin}` : 'no-ptype'}`;
+    const key = `${loopKey}|${fieldKey}|${zoomBucket}/${latBucket}/${maskToPrecip}/${showBourgouin}`;
+    // The loader works in forecast hours; within one loop each frame has its own.
+    const frameOf = new Map(loop.map((f) => [f.fhour, f]));
     set({ prefetch: null });
     // Wait a moment so the frame on screen gets the first requests, and so quick changes do not each start a load.
     const timer = window.setTimeout(() => {
-      const hours = Array.from({ length: maxFhour(init) + 1 }, (_, h) => h);
-      startedAt.current = useApp.getState().fhour;
+      const now = useApp.getState();
+      startedAt.current = now.fhour;
+      // Nearest first: the frames after the one on screen, then round to the start of the loop.
+      const at = frameIndex(loop, now);
+      const hours = mode === 'trend'
+        ? [...loop.slice(at + 1), ...loop.slice(0, Math.max(0, at))].map((f) => f.fhour)
+        : prefetchOrder(now.fhour, loop.map((f) => f.fhour));
       startPrefetch(
         {
           key,
-          hours: prefetchOrder(useApp.getState().fhour, hours),
+          hours,
           // Keep room for the frame on screen, whose messages share the cache.
           messageBudget: messageCacheCapacity() - 10,
-          fetchMessage: (fh, search) => fetchHrrrMessage(init, fh, search),
+          fetchMessage: (fh, search) => fetchHrrrMessage(frameOf.get(fh)!.init, fh, search),
           loadHour: async (fh, fetch) => {
+            const init = frameOf.get(fh)!.init;
+            const entry = manifest?.get(init);
             const hourKey = `${init}|${fh}`;
             // Messages that only fed a prebuilt layer are released afterwards; those a filled layer or the
             // mask needs stay cached, and only they count against the memory budget (through `fetch`).
@@ -260,5 +283,5 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       window.clearTimeout(timer);
       stopPrefetch();
     };
-  }, [layers, init, fieldKey, manifest, preloadRun, maskToPrecip, showBourgouin, zoomBucket, latBucket, restart]);
+  }, [layers, loopKey, fieldKey, manifest, preloadRun, maskToPrecip, showBourgouin, zoomBucket, latBucket, restart]);
 }

@@ -64,7 +64,13 @@ export function loadModel(): Promise<Loaded> {
   return loading;
 }
 
+// One network run at a time: the trend chart asks for many while the panel asks for its own, and a
+// single ONNX Runtime session is not documented to accept overlapping runs.
+let lastRun: Promise<unknown> = Promise.resolve();
+
 export async function predict(profile: Profile): Promise<Prediction> {
   const { run, meta } = await loadModel();
-  return dirichlet(await run(buildInput(profile, meta)));
+  const out = lastRun.then(() => run(buildInput(profile, meta)));
+  lastRun = out.catch(() => undefined);
+  return dirichlet(await out);
 }

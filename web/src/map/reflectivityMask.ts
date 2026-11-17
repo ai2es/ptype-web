@@ -9,6 +9,7 @@
  * decoded field, so masks are cached here and the field is released once the
  * mask is built. (The reflectivity layer keeps its own texture, not the field.)
  */
+import { isKept, type KeepFrame } from '../time/trend';
 import { fetchHrrrMessage, releaseHrrrMessage, type HrrrMessage } from '../data/hrrr';
 import type { PtypeLevel } from '../data/ptype';
 import type { InitIso } from '../time/times';
@@ -56,9 +57,12 @@ export function reflectivityMask(
   return p;
 }
 
-/** Forget the masks of every run but `init`. */
-export function releaseMasksExcept(init: InitIso | null): void {
-  for (const key of [...masks.keys()]) if (init === null || !key.startsWith(`${init}|`)) masks.delete(key);
+/** Forget the masks that `keep` does not cover. */
+export function releaseMasksExcept(keep: KeepFrame[]): void {
+  for (const key of [...masks.keys()]) {
+    const [init, fhour] = key.split('|');
+    if (!isKept(keep, init, Number(fhour))) masks.delete(key);
+  }
 }
 
 /** What the cache holds: for the memory probe (`?memdebug`). */

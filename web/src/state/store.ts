@@ -5,9 +5,12 @@ import type { Manifest } from '../data/manifest';
 import type { PrefetchProgress } from '../data/prefetch';
 import type { Prediction } from '../model/evidential';
 import type { Profile } from '../sounding/profile';
-import { initHour, maxForecastHour, shiftInit, type InitIso } from '../time/times';
+import { initDate, initHour, maxForecastHour, shiftInit, type InitIso } from '../time/times';
+import { nearestFrame, runFrames, trendFrames, validIso, type Frame } from '../time/trend';
 
 export type BoundaryId = 'states' | 'counties' | 'cwas' | 'highways' | 'cities';
+/** 'run': step through the hours of one run. 'trend': step through the runs valid at one time. */
+export type Mode = 'run' | 'trend';
 export type LayerStatus = 'loading' | 'ok' | 'unavailable' | 'error';
 
 export interface SoundingState {
@@ -25,6 +28,8 @@ export interface SoundingState {
 export interface AppState {
   manifest: Manifest | null;
   manifestError: string | null;
+  mode: Mode;
+  /** The run and forecast hour on screen, in both modes. In trend mode they change together. */
   init: InitIso | null;
   fhour: number;
   playing: boolean;
@@ -56,8 +61,15 @@ export interface AppState {
   setManifest(m: Manifest | null, error?: string | null): void;
   setInit(init: InitIso): void;
   setFhour(fhour: number): void;
+  setMode(mode: Mode): void;
+  /** Show frame `index` of the current loop (see `loopFrames`). */
+  setFrame(index: number): void;
+  /** Move along the loop: forecast hours in run mode, runs in trend mode. Wraps at the ends. */
   stepFhour(delta: number): void;
+  /** Run mode: move to another run. Trend mode: move the valid time. */
   stepInit(deltaHours: number): void;
+  /** Trend mode: show the forecasts valid at another time, keeping the lead where that run exists. */
+  setValid(valid: InitIso): void;
   setPlaying(playing: boolean): void;
   setFrameMs(ms: number): void;
   setPoint(point: { lon: number; lat: number } | null): void;
@@ -75,9 +87,27 @@ export function maxFhour(init: InitIso | null): number {
   return init ? maxForecastHour(initHour(init)) : 18;
 }
 
+/**
+ * The frames the slider, the arrow keys and the animation move through, in slider order:
+ * the hours of the run, or (trend mode) the runs valid at the time on screen, longest lead first.
+ */
+export function loopFrames(s: Pick<AppState, 'mode' | 'init' | 'fhour'>): Frame[] {
+  if (!s.init) return [];
+  if (s.mode !== 'trend') return runFrames(s.init);
+  // The run on screen always counts, even one picked ahead of the clock.
+  return trendFrames(validIso(s.init, s.fhour), new Date(Math.max(Date.now(), initDate(s.init).getTime())));
+}
+
+/** Position of the frame on screen in `frames`, or the nearest lead if it is not one of them. */
+export function frameIndex(frames: Frame[], s: Pick<AppState, 'init' | 'fhour'>): number {
+  const k = frames.findIndex((f) => f.init === s.init && f.fhour === s.fhour);
+  return k >= 0 ? k : nearestFrame(frames, s.fhour);
+}
+
 export const useApp = create<AppState>((set, get) => ({
   manifest: null,
   manifestError: null,
+  mode: 'run',
   init: null,
   fhour: 1,
   playing: false,
@@ -103,14 +133,30 @@ export const useApp = create<AppState>((set, get) => ({
   setManifest: (manifest, error = null) => set({ manifest, manifestError: error }),
   setInit: (init) => set((s) => ({ init, fhour: Math.min(s.fhour, maxFhour(init)) })),
   setFhour: (fhour) => set((s) => ({ fhour: Math.max(0, Math.min(maxFhour(s.init), Math.round(fhour))) })),
+  setMode: (mode) => set({ mode }),
+  setFrame: (index) => {
+    const frames = loopFrames(get());
+    if (frames.length === 0) return;
+    const f = frames[Math.max(0, Math.min(frames.length - 1, Math.round(index)))];
+    set({ init: f.init, fhour: f.fhour });
+  },
   stepFhour: (delta) => {
-    const { fhour, init } = get();
-    const n = maxFhour(init) + 1;
-    set({ fhour: (((fhour + delta) % n) + n) % n });
+    const frames = loopFrames(get());
+    const n = frames.length;
+    if (n === 0) return;
+    const f = frames[(((frameIndex(frames, get()) + delta) % n) + n) % n];
+    set({ init: f.init, fhour: f.fhour });
   },
   stepInit: (deltaHours) => {
-    const { init } = get();
-    if (init) get().setInit(shiftInit(init, deltaHours));
+    const { init, fhour, mode } = get();
+    if (!init) return;
+    if (mode === 'trend') get().setValid(shiftInit(validIso(init, fhour), deltaHours));
+    else get().setInit(shiftInit(init, deltaHours));
+  },
+  setValid: (valid) => {
+    const frames = trendFrames(valid);
+    const k = nearestFrame(frames, get().fhour);
+    if (k >= 0) set({ init: frames[k].init, fhour: frames[k].fhour });
   },
   setPlaying: (playing) => set({ playing }),
   setFrameMs: (frameMs) => set({ frameMs }),

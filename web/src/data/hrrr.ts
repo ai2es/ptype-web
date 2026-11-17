@@ -6,6 +6,7 @@
 import { Grib2Inventory } from '../vendor/gribjs/ts/index';
 import { isLowMemoryDevice } from '../config/device';
 import { hrrrGribUrl, type InitIso } from '../time/times';
+import { isKept, type KeepFrame } from '../time/trend';
 
 export interface HrrrGridInfo {
   ni: number;
@@ -108,16 +109,24 @@ export function releaseHrrrMessage(init: InitIso, fhour: number, search: string)
   messages.delete(`${hrrrGribUrl(init, fhour)}|${search}`);
 }
 
+/** The run and forecast hour a file URL belongs to, or null if it is not an HRRR surface file. */
+function frameOfUrl(url: string): { init: InitIso; fhour: number } | null {
+  const m = /hrrr\.(\d{4})(\d{2})(\d{2})\/conus\/hrrr\.t(\d{2})z\.wrfsfcf(\d+)\.grib2/.exec(url);
+  return m ? { init: `${m[1]}-${m[2]}-${m[3]}T${m[4]}:00Z`, fhour: Number(m[5]) } : null;
+}
+
 /**
- * Forget everything that does not belong to `init`: decoded messages (about 7.6 MB each) and file
- * inventories. Called when the user selects another run, so the old run's fields can be garbage
- * collected at once instead of waiting to be pushed out one by one.
+ * Forget everything that `keep` does not cover: decoded messages (about 7.6 MB each) and file
+ * inventories. Called when the user selects another run (or, in trend mode, another valid time), so
+ * the old fields can be garbage collected at once instead of waiting to be pushed out one by one.
  */
-export function releaseHrrrExcept(init: InitIso | null): void {
-  // Every file of a run shares this prefix; the forecast hour comes after it.
-  const keep = init === null ? null : hrrrGribUrl(init, 0).replace(/\d+\.grib2$/, '');
-  for (const key of [...messages.keys()]) if (keep === null || !key.startsWith(keep)) messages.delete(key);
-  for (const url of [...inventories.keys()]) if (keep === null || !url.startsWith(keep)) inventories.delete(url);
+export function releaseHrrrExcept(keep: KeepFrame[]): void {
+  const kept = (url: string) => {
+    const f = frameOfUrl(url);
+    return f !== null && isKept(keep, f.init, f.fhour);
+  };
+  for (const key of [...messages.keys()]) if (!kept(key.split('|')[0])) messages.delete(key);
+  for (const url of [...inventories.keys()]) if (!kept(url)) inventories.delete(url);
 }
 
 /** True when the run's file for this forecast hour exists on the bucket. */

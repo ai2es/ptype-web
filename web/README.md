@@ -37,6 +37,32 @@ sample data (`VITE_PTYPE_URL=sample-data/ptype`,
 `VITE_SOUNDING_URL=sample-data/soundings.zarr`), copy `.env.example` to
 `.env.local`. The layouts the site expects are in [docs/data-schema.md](docs/data-schema.md).
 
+## Model run and model trend
+
+The toggle at the left of the time bar switches between two ways of stepping through forecasts.
+
+- **Model run** fixes the HRRR run and steps through its forecast hours.
+- **Model trend** (dprog/dt) fixes the valid time and steps through every run that covers it, the longest lead
+  at the left of the slider and the analysis (F00) at the right. Hourly runs reach 18 h and the 00/06/12/18 UTC
+  runs 48 h, so a past valid time has 24 frames: five between F48 and F19, six hours apart, then F18 to F00
+  (`trendFrames` in `src/time/trend.ts`). The slider and the chart below give every frame the same width
+  and label the leads, so the long leads do not take up most of the bar.
+
+The state is the same in both modes: a run and a forecast hour (`src/state/store.ts`). Trend mode changes
+them together so that their sum stays fixed, which is why the map, the hover readout and the sounding panel do
+not know about the mode, and why switching mode keeps the frame on screen. `mode=trend` in the URL reopens a
+link in trend mode.
+
+Any HRRR run counts. A run without a generated precipitation-type forecast shows its HRRR fields only, as in
+run mode; a run whose file is not on NOAA's bucket is hatched on the slider and passed over by the animation.
+
+With a point selected, trend mode adds a chart to the sounding panel: the four class probabilities and the
+uncertainty at that point from every run of the loop (`src/sounding/TrendChart.tsx`). Each value is the run's
+stored sounding put through the network, the same as the probability bars, so the two agree. Clicking the
+chart shows that run. For 24 runs it took 169 small requests and 4.8 s to fill on a desktop connection.
+Snow blue and sleet purple are hard to tell apart as thin lines (the site's type colours are shared with the
+map), so each series also has its own marker shape and the values are available as a table.
+
 ## Background loading
 
 With "Preload run" ticked in the time bar (the default), the layers that are switched on are loaded for every
@@ -55,6 +81,11 @@ Everything the site holds is tied to the selected run. Selecting another run (`u
 time") drops the old run's decoded HRRR fields, precipitation-type frames, masks and prebuilt contour layers,
 and deletes the prebuilt layers' graphics buffers explicitly (`disposeGl` in `src/map/WeatherLayers.ts`):
 autumnplot-gl never deletes them, and the browser did not collect any on its own in testing.
+
+A trend loop is held the same way: one forecast hour of each of its runs is kept, and choosing another valid
+time drops the old loop. Measured in headless WebKit with 2 m temperature, pressure and reflectivity on, a
+preloaded 24-run loop held 338 MB (frames 76, masks 11, buffers 158, textures 94), about half of one 48-hour
+run, and stayed there over three changes of valid time (466 MB of buffers deleted).
 
 Open the site with `?memdebug` and call `ptypeMemory()` in the console to see what each cache and the graphics
 card hold (`src/debug/memory.ts`). `?memdebug=norelease` switches the run-change release off for comparison.
@@ -141,6 +172,9 @@ the browser-side code against the same fixtures.
 `←`/`→` or `,`/`.` step the forecast hour, `Space` plays or pauses, `Home`/`End`
 jump to the first or last hour, `Shift`+`←`/`→` change the model run, `[`/`]`
 change the animation speed, `?` lists the shortcuts.
+
+In model trend mode the same keys work along the loop: `←`/`→` show the older or newer run, `Home`/`End`
+the longest lead or the analysis, and `Shift`+`←`/`→` move the valid time by an hour.
 
 ## Third-party pieces
 
