@@ -55,9 +55,9 @@ export function LayerMenu() {
         </label>
         <label className="check">
           <input type="checkbox" checked={s.maskToPrecip} onChange={() => s.set({ maskToPrecip: !s.maskToPrecip })} />
-          <span>Only where the HRRR has precipitation</span>
+          <span>Only where HRRR composite reflectivity is above 0 dBZ</span>
           {s.maskToPrecip && s.layerStatus['ptype-mask'] && s.layerStatus['ptype-mask'] !== 'ok' && (
-            <span className="status status-unavailable">HRRR mask unavailable; showing everywhere</span>
+            <span className="status status-unavailable">HRRR reflectivity unavailable; showing everywhere</span>
           )}
         </label>
         <label className="range">
