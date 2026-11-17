@@ -33,6 +33,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
   const manifest = useApp((s) => s.manifest);
   const showPtype = useApp((s) => s.showPtype);
   const showUncertainty = useApp((s) => s.showUncertainty);
+  const showBourgouin = useApp((s) => s.showBourgouin);
   const maskToPrecip = useApp((s) => s.maskToPrecip);
   const ptypeOpacity = useApp((s) => s.ptypeOpacity);
   const playing = useApp((s) => s.playing);
@@ -97,9 +98,11 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
     const stale = () => gen !== ptypeGen.current;
     const clear = (status: 'unavailable' | 'error' | null) => {
       layers.remove('ptype');
+      layers.remove('bourgouin');
       layers.remove('uncertainty');
       setHoverFrame(null, null);
       setLayerStatus('ptype', status);
+      setLayerStatus('bourgouin', showBourgouin ? status : null);
     };
     const entry = manifest?.get(init);
     if (!entry || !entry.forecastHours.includes(fhour)) {
@@ -137,13 +140,28 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       setHoverFrame(frame, mask);
       await layers.setPtype(showPtype ? frame : null, mask, ptypeOpacity);
       await layers.setUncertainty(showUncertainty ? frame : null, mask);
-      if (!stale()) setLayerStatus('ptype', 'ok');
+      if (stale()) return;
+      setLayerStatus('ptype', 'ok');
+      // The revised Bourgouin diagnosis, from the same store and with the same mask, colours and opacity.
+      if (!showBourgouin) {
+        layers.remove('bourgouin');
+        setLayerStatus('bourgouin', null);
+      } else if (!store.hasBourgouin) {
+        layers.remove('bourgouin');
+        setLayerStatus('bourgouin', 'unavailable');
+      } else {
+        setLayerStatus('bourgouin', 'loading');
+        const bourgouin = await readPtypeFrame(store, level, fhour, 'BOURG');
+        if (stale()) return;
+        await layers.setPtype(bourgouin, mask, ptypeOpacity, 'bourgouin');
+        if (!stale()) setLayerStatus('bourgouin', 'ok');
+      }
     })().catch((err) => {
       if (stale()) return;
       console.error(err);
       clear('error');
     });
-  }, [layers, init, fhour, manifest, showPtype, showUncertainty, maskToPrecip, ptypeOpacity, zoomBucket, latBucket, setLayerStatus]);
+  }, [layers, init, fhour, manifest, showPtype, showBourgouin, showUncertainty, maskToPrecip, ptypeOpacity, zoomBucket, latBucket, setLayerStatus]);
 
   // The rest of the run, in the background -------------------------------------
   // Deliberately not keyed on the forecast hour: stepping through the run must not restart the loading.
@@ -166,7 +184,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
     }
     const entry = manifest?.get(init);
     const fields = fieldKey ? fieldKey.split(',') : [];
-    const key = `${init}|${fieldKey}|${entry ? `${zoomBucket}/${latBucket}/${maskToPrecip}` : 'no-ptype'}`;
+    const key = `${init}|${fieldKey}|${entry ? `${zoomBucket}/${latBucket}/${maskToPrecip}/${showBourgouin}` : 'no-ptype'}`;
     set({ prefetch: null });
     // Wait a moment so the frame on screen gets the first requests, and so quick changes do not each start a load.
     const timer = window.setTimeout(() => {
@@ -207,6 +225,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
               const level = chooseLevel(store, zoomBucket, latBucket);
               if (!hasPtypeFrame(store, level, fh) && frameCacheRoom(store, level) < 1) fits = false;
               else {
+                if (showBourgouin && store.hasBourgouin) jobs.push(readPtypeFrame(store, level, fh, 'BOURG'));
                 jobs.push(
                   readPtypeFrame(store, level, fh).then((frame) =>
                     maskToPrecip && !frame.mask ? Promise.all(PRECIP_SEARCHES.map(keep)) : undefined,
@@ -226,5 +245,5 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       window.clearTimeout(timer);
       stopPrefetch();
     };
-  }, [layers, init, fieldKey, manifest, preloadRun, maskToPrecip, zoomBucket, latBucket, restart]);
+  }, [layers, init, fieldKey, manifest, preloadRun, maskToPrecip, showBourgouin, zoomBucket, latBucket, restart]);
 }

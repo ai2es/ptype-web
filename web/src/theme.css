@@ -218,3 +218,5 @@ kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12
   .header .title p, .header-right .logo { display: none; }
   .layer-menu { width: 240px; }
 }
+
+.layer-note { margin: 2px 0 0 24px; font-size: 11.5px; line-height: 1.35; color: var(--gray-11); }

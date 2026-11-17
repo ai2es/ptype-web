@@ -34,6 +34,8 @@ export interface AppState {
   /** Ids of the HRRR fields drawn on the map (see fields/registry.ts). */
   activeFields: string[];
   showPtype: boolean;
+  /** Draw the revised Bourgouin most likely type instead of the network's. */
+  showBourgouin: boolean;
   ptypeOpacity: number;
   maskToPrecip: boolean;
   showUncertainty: boolean;
@@ -83,6 +85,7 @@ export const useApp = create<AppState>((set, get) => ({
   point: null,
   activeFields: ['t2m'],
   showPtype: true,
+  showBourgouin: false,
   ptypeOpacity: 0.85,
   maskToPrecip: true,
   showUncertainty: false,

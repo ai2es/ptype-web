@@ -26,19 +26,21 @@ function ColorBar({ fieldId }: { fieldId: string }) {
 
 export function Legend() {
   const showPtype = useApp((s) => s.showPtype);
+  const showBourgouin = useApp((s) => s.showBourgouin);
+  const showTypes = showPtype || showBourgouin;
   const activeFields = useApp((s) => s.activeFields);
   const firstBin = Math.round(LEGEND_MIN_PROB * 10);
   const bars = activeFields.filter((id) => {
     const style = FIELD_BY_ID.get(id)?.style;
     return style && 'colorbar' in style && style.colorbar;
   });
-  if (!showPtype && bars.length === 0 && !activeFields.includes('hrrr_ptype')) return null;
+  if (!showTypes && bars.length === 0 && !activeFields.includes('hrrr_ptype')) return null;
 
   return (
     <div className="legend" aria-label="Map legend">
-      {showPtype && (
+      {showTypes && (
         <div className="legend-block">
-          <div className="legend-title">Most likely type · probability</div>
+          <div className="legend-title">Most likely type · probability{showBourgouin && !showPtype ? ' (Bourgouin)' : ''}</div>
           {PTYPE_STYLES.map((s) => (
             <div className="legend-row" key={s.id}>
               <span className="legend-name">{s.label}</span>
