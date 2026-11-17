@@ -37,6 +37,14 @@ sample data (`VITE_PTYPE_URL=sample-data/ptype`,
 `VITE_SOUNDING_URL=sample-data/soundings.zarr`), copy `.env.example` to
 `.env.local`. The layouts the site expects are in [docs/data-schema.md](docs/data-schema.md).
 
+## Background loading
+
+With "Preload run" ticked in the time bar (the default), the layers that are switched on are loaded for every
+forecast hour of the selected run in the background, nearest hours first, two hours at a time. The thin bar
+under the slider shows which hours are in memory. Decoded HRRR fields are about 7.6 MB each, so the caches are
+capped (about 80 fields and 512 MB of precipitation-type frames on a desktop); a long run with several fields
+stops at "memory limit" and carries on from wherever you move to. The logic is in `src/data/prefetch.ts`.
+
 ## Commands
 
 | Command | What it does |

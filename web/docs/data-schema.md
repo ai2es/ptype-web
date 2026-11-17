@@ -65,6 +65,10 @@ Rows may run south to north or north to south; the sign of the y term in
 `spatial:transform` says which. Chunk so that one forecast hour of one level is
 a small number of chunks (topozarr's defaults do this).
 
+Stores written by `ptype.hrrr_fast` also hold `precip_mask` (uint8, 1 where any HRRR categorical type is
+set) at every level, listed under the root attribute `hrrr_ptype.variables`. When it is there the site masks
+with it and does not download the four categorical fields from NOAA.
+
 The map shows the most likely class shaded by its probability. By default it
 is masked to where the HRRR's own categorical fields report precipitation;
 those come straight from NOAA (below), not from this store.

@@ -27,8 +27,18 @@ export class HrrrUnavailable extends Error {}
 
 const inventories = new Map<string, Promise<Grib2Inventory>>();
 const messages = new Map<string, Promise<HrrrMessage>>();
-/** Each decoded CONUS field is about 7.6 MB, so keep the cache modest. */
-const MAX_MESSAGES = 36;
+/**
+ * Each decoded CONUS field is about 7.6 MB. The cache is sized so that a whole
+ * run of a couple of fields can be held for animation (see data/prefetch.ts):
+ * about 0.6 GB on a desktop, less where the browser reports little memory.
+ */
+const deviceGb = (globalThis.navigator as { deviceMemory?: number } | undefined)?.deviceMemory ?? 8;
+const MAX_MESSAGES = deviceGb >= 8 ? 80 : deviceGb >= 4 ? 48 : 24;
+
+/** How many decoded messages the cache holds before the oldest is dropped. */
+export function messageCacheCapacity(): number {
+  return MAX_MESSAGES;
+}
 
 function inventory(url: string): Promise<Grib2Inventory> {
   let p = inventories.get(url);

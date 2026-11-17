@@ -1,6 +1,7 @@
 /** Application state. Components read slices with `useApp(selector)`. */
 import { create } from 'zustand';
 import type { Manifest } from '../data/manifest';
+import type { PrefetchProgress } from '../data/prefetch';
 import type { Prediction } from '../model/evidential';
 import type { Profile } from '../sounding/profile';
 import { initHour, maxForecastHour, shiftInit, type InitIso } from '../time/times';
@@ -38,6 +39,10 @@ export interface AppState {
   boundaries: Record<BoundaryId, boolean>;
   /** Load state per map layer id, for the layer menu. */
   layerStatus: Record<string, LayerStatus>;
+  /** Load the selected layers for every hour of the run in the background. */
+  preloadRun: boolean;
+  /** How far the background loading has got, for the time bar. */
+  prefetch: PrefetchProgress | null;
   sounding: SoundingState;
   /** Gaussian width (in levels) over which a drag is spread. */
   editSigma: number;
@@ -82,6 +87,8 @@ export const useApp = create<AppState>((set, get) => ({
   showUncertainty: false,
   boundaries: { states: true, counties: false, cwas: false, highways: true, cities: true },
   layerStatus: {},
+  preloadRun: true,
+  prefetch: null,
   sounding: { status: 'idle' },
   editSigma: 2,
   lockRh: false,

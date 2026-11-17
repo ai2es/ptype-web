@@ -1,8 +1,9 @@
 /** Loads the data for the selected time and hands it to the map layers. */
-import { useEffect, useRef } from 'react';
-import { HrrrUnavailable, fetchHrrrMessage } from '../data/hrrr';
+import { useEffect, useRef, useState } from 'react';
+import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity } from '../data/hrrr';
 import { storeUrl } from '../data/manifest';
-import { chooseLevel, openPtypeStore, readPtypeFrame } from '../data/ptype';
+import { prefetchOrder, startPrefetch, stopPrefetch } from '../data/prefetch';
+import { chooseLevel, frameCacheRoom, hasPtypeFrame, openPtypeStore, readPtypeFrame } from '../data/ptype';
 import { FIELD_BY_ID } from '../fields/registry';
 import { maxFhour, useApp } from '../state/store';
 import type { InitIso } from '../time/times';
@@ -101,7 +102,11 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       const level = chooseLevel(store, zoomBucket, latBucket);
       const frame = await readPtypeFrame(store, level, fhour);
       let mask: Uint8Array | null = null;
-      if (maskToPrecip) {
+      if (maskToPrecip && frame.mask) {
+        // The store carries the HRRR precipitation mask at this pyramid level: no extra downloads.
+        mask = frame.mask;
+        setLayerStatus('ptype-mask', 'ok');
+      } else if (maskToPrecip) {
         try {
           const precip = await Promise.all(PRECIP_SEARCHES.map((s) => fetchHrrrMessage(init, fhour, s)));
           mask = precipMask(frame.level.grid, precip);
@@ -124,4 +129,66 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       clear('error');
     });
   }, [layers, init, fhour, manifest, showPtype, showUncertainty, maskToPrecip, ptypeOpacity, zoomBucket, latBucket, setLayerStatus]);
+
+  // The rest of the run, in the background -------------------------------------
+  // Deliberately not keyed on the forecast hour: stepping through the run must not restart the loading.
+  const preloadRun = useApp((s) => s.preloadRun);
+  const fieldKey = [...activeFields].sort().join(',');
+  // When the run does not fit in memory, loading stops part way. If the user then moves to an hour that was
+  // not reached, start again from there (the oldest hours are dropped to make room).
+  const [restart, setRestart] = useState(0);
+  const startedAt = useRef(-1);
+  const prefetch = useApp((s) => s.prefetch);
+  useEffect(() => {
+    if (prefetch?.limited && !prefetch.active && fhour !== startedAt.current && !prefetch.ready.includes(fhour)) setRestart((n) => n + 1);
+  }, [fhour, prefetch]);
+  useEffect(() => {
+    const { set } = useApp.getState();
+    if (!layers || !init || !preloadRun) {
+      stopPrefetch();
+      set({ prefetch: null });
+      return;
+    }
+    const entry = manifest?.get(init);
+    const fields = fieldKey ? fieldKey.split(',') : [];
+    const key = `${init}|${fieldKey}|${entry ? `${zoomBucket}/${latBucket}/${maskToPrecip}` : 'no-ptype'}`;
+    set({ prefetch: null });
+    // Wait a moment so the frame on screen gets the first requests, and so quick changes do not each start a load.
+    const timer = window.setTimeout(() => {
+      const hours = Array.from({ length: maxFhour(init) + 1 }, (_, h) => h);
+      startedAt.current = useApp.getState().fhour;
+      startPrefetch(
+        {
+          key,
+          hours: prefetchOrder(useApp.getState().fhour, hours),
+          // Keep room for the frame on screen, whose messages share the cache.
+          messageBudget: messageCacheCapacity() - 10,
+          fetchMessage: (fh, search) => fetchHrrrMessage(init, fh, search),
+          loadHour: async (fh, fetch) => {
+            const jobs: Promise<unknown>[] = fields.map((id) => FIELD_BY_ID.get(id)?.load(fetch) ?? Promise.resolve());
+            let fits = true;
+            if (entry?.forecastHours.includes(fh)) {
+              const store = await openPtypeStore(storeUrl(entry));
+              const level = chooseLevel(store, zoomBucket, latBucket);
+              if (!hasPtypeFrame(store, level, fh) && frameCacheRoom(store, level) < 1) fits = false;
+              else {
+                jobs.push(
+                  readPtypeFrame(store, level, fh).then((frame) =>
+                    maskToPrecip && !frame.mask ? Promise.all(PRECIP_SEARCHES.map(fetch)) : undefined,
+                  ),
+                );
+              }
+            }
+            await Promise.all(jobs);
+            return fits;
+          },
+        },
+        (progress) => useApp.getState().set({ prefetch: progress }),
+      );
+    }, 600);
+    return () => {
+      window.clearTimeout(timer);
+      stopPrefetch();
+    };
+  }, [layers, init, fieldKey, manifest, preloadRun, maskToPrecip, zoomBucket, latBucket, restart]);
 }

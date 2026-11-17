@@ -19,6 +19,8 @@ export interface PtypeStore {
   /** Finest level first. */
   levels: PtypeLevel[];
   forecastHours: number[];
+  /** True when the store has the HRRR precipitation mask alongside the probabilities. */
+  hasMask: boolean;
 }
 
 /** One forecast hour of one pyramid level. All arrays are row-major from the south-west corner. */
@@ -26,6 +28,8 @@ export interface PtypeFrame {
   level: PtypeLevel;
   probs: Record<PtypeClass, Float32Array>;
   u: Float32Array;
+  /** 1 where the HRRR has precipitation, when the store carries that field. */
+  mask?: Uint8Array;
 }
 
 interface LayoutEntry {
@@ -56,7 +60,9 @@ async function open(url: string): Promise<PtypeStore> {
   });
   const fhArr = await zarr.open.v3(group.resolve(`${levels[0].path}/forecast_hour`), { kind: 'array' });
   const fh = await zarr.get(fhArr);
-  return { url, group, levels, forecastHours: Array.from(fh.data as ArrayLike<number | bigint>, Number) };
+  // Stores written by ptype.hrrr_fast list their variables; older ones have only the probabilities.
+  const variables = (attrs.hrrr_ptype as { variables?: Record<string, unknown> } | undefined)?.variables;
+  return { url, group, levels, forecastHours: Array.from(fh.data as ArrayLike<number | bigint>, Number), hasMask: !!variables && 'precip_mask' in variables };
 }
 
 export function openPtypeStore(url: string): Promise<PtypeStore> {
@@ -71,8 +77,8 @@ export function openPtypeStore(url: string): Promise<PtypeStore> {
   return p;
 }
 
-function flip(data: Float32Array, ni: number, nj: number): Float32Array {
-  const out = new Float32Array(data.length);
+function flip<T extends Float32Array | Uint8Array>(data: T, ni: number, nj: number): T {
+  const out = new (data.constructor as new (n: number) => T)(data.length);
   for (let j = 0; j < nj; j++) out.set(data.subarray(j * ni, (j + 1) * ni), (nj - 1 - j) * ni);
   return out;
 }
@@ -84,23 +90,68 @@ async function readVar(store: PtypeStore, level: PtypeLevel, name: string, fhInd
   return level.flipRows ? flip(f32, level.grid.ni, level.grid.nj) : f32;
 }
 
+async function readMask(store: PtypeStore, level: PtypeLevel, fhIndex: number): Promise<Uint8Array> {
+  const arr = await zarr.open.v3(store.group.resolve(`${level.path}/precip_mask`), { kind: 'array' });
+  const { data } = await zarr.get(arr, [fhIndex, null, null]);
+  const u8 = data instanceof Uint8Array ? data : Uint8Array.from(data as ArrayLike<number>);
+  return level.flipRows ? flip(u8, level.grid.ni, level.grid.nj) : u8;
+}
+
 const frames = new Map<string, Promise<PtypeFrame>>();
-const MAX_FRAMES = 60;
+const frameSizes = new Map<string, number>();
+/**
+ * Frames are cached by size, not count: one hour is about 2 MB at the coarsest
+ * pyramid level and 40 MB at the native 3 km grid.
+ */
+const MAX_FRAME_BYTES = 512 * 1024 * 1024;
+
+function frameSize(level: PtypeLevel, withMask: boolean): number {
+  return level.grid.ni * level.grid.nj * (5 * 4 + (withMask ? 1 : 0));
+}
+
+/** How many more frames of this level fit in the cache without dropping any. */
+export function frameCacheRoom(store: PtypeStore, levelIndex: number): number {
+  let used = 0;
+  for (const n of frameSizes.values()) used += n;
+  return Math.floor((MAX_FRAME_BYTES - used) / frameSize(store.levels[levelIndex], store.hasMask));
+}
+
+/** True when this frame is already in memory (or on its way). */
+export function hasPtypeFrame(store: PtypeStore, levelIndex: number, fhour: number): boolean {
+  return frames.has(`${store.url}|${levelIndex}|${fhour}`);
+}
 
 /** Read one forecast hour at one pyramid level (cached). */
 export function readPtypeFrame(store: PtypeStore, levelIndex: number, fhour: number): Promise<PtypeFrame> {
   const key = `${store.url}|${levelIndex}|${fhour}`;
   const hit = frames.get(key);
-  if (hit) return hit;
+  if (hit) {
+    // Refresh recency, so the frame on screen is the last to be dropped.
+    frames.delete(key);
+    frames.set(key, hit);
+    return hit;
+  }
   const fhIndex = store.forecastHours.indexOf(fhour);
   if (fhIndex < 0) return Promise.reject(new Error(`Forecast hour ${fhour} is not in the store`));
   const level = store.levels[levelIndex];
-  const p = Promise.all(
-    ['ML_rain', 'ML_snow', 'ML_icep', 'ML_frzr', 'ML_u'].map((v) => readVar(store, level, v, fhIndex)),
-  ).then(([rain, snow, icep, frzr, u]) => ({ level, probs: { rain, snow, icep, frzr }, u }));
-  p.catch(() => frames.delete(key));
+  const p = Promise.all([
+    Promise.all(['ML_rain', 'ML_snow', 'ML_icep', 'ML_frzr', 'ML_u'].map((v) => readVar(store, level, v, fhIndex))),
+    store.hasMask ? readMask(store, level, fhIndex) : undefined,
+  ]).then(([[rain, snow, icep, frzr, u], mask]) => ({ level, probs: { rain, snow, icep, frzr }, u, mask }));
+  const drop = (k: string) => {
+    frames.delete(k);
+    frameSizes.delete(k);
+  };
+  p.catch(() => drop(key));
   frames.set(key, p);
-  if (frames.size > MAX_FRAMES) frames.delete(frames.keys().next().value!);
+  frameSizes.set(key, frameSize(level, store.hasMask));
+  let used = 0;
+  for (const n of frameSizes.values()) used += n;
+  while (used > MAX_FRAME_BYTES && frames.size > 1) {
+    const oldest = frames.keys().next().value!;
+    used -= frameSizes.get(oldest) ?? 0;
+    drop(oldest);
+  }
   return p;
 }
 
