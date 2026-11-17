@@ -52,12 +52,13 @@ export function dominantField(frame: PtypeFrame, mask: Uint8Array | null): Float
 }
 
 /**
- * Mask of ptype-grid cells where the HRRR reports any precipitation type.
- * `precip` holds the HRRR categorical fields (CRAIN, CSNOW, CICEP, CFRZR) on
- * the native 3 km grid; coarser pyramid cells are set if any 3 km cell inside
- * them has precipitation.
+ * Mask of ptype-grid cells where any of `fields` exceeds `threshold`.
+ * `fields` are HRRR messages on the native 3 km grid: composite reflectivity
+ * (threshold 0 dBZ) or, for the older fallback, the categorical types CRAIN,
+ * CSNOW, CICEP and CFRZR (threshold 0.5). Coarser pyramid cells are set if
+ * any 3 km cell inside them qualifies.
  */
-export function precipMask(grid: GridDef, precip: HrrrMessage[]): Uint8Array {
+export function precipMask(grid: GridDef, precip: HrrrMessage[], threshold = 0.5): Uint8Array {
   const h = precip[0].grid;
   const proj = new Lambert(grid);
   const [hx0, hy0] = proj.forward(h.llLon, h.llLat);
@@ -76,7 +77,7 @@ export function precipMask(grid: GridDef, precip: HrrrMessage[]): Uint8Array {
           const ii = i0 + di;
           if (ii < 0 || ii >= h.ni) continue;
           const idx = jj * h.ni + ii;
-          if (precip.some((m) => m.data[idx] > 0.5)) {
+          if (precip.some((m) => m.data[idx] > threshold)) {
             any = 1;
             break;
           }

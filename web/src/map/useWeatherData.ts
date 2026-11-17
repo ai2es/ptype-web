@@ -8,10 +8,8 @@ import { FIELD_BY_ID } from '../fields/registry';
 import { maxFhour, useApp } from '../state/store';
 import type { InitIso } from '../time/times';
 import { setHoverFrame } from './hoverData';
-import { precipMask } from './ptypeField';
+import { reflectivityMask } from './reflectivityMask';
 import { canPrebuild, type WeatherLayers } from './WeatherLayers';
-
-const PRECIP_SEARCHES = [':CRAIN:surface:', ':CSNOW:surface:', ':CICEP:surface:', ':CFRZR:surface:'];
 
 function statusFor(err: unknown) {
   if (!(err instanceof HrrrUnavailable)) console.error('layer failed:', err instanceof Error ? err.stack ?? err.message : String(err));
@@ -120,19 +118,17 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       const level = chooseLevel(store, zoomBucket, latBucket);
       const frame = await readPtypeFrame(store, level, fhour);
       let mask: Uint8Array | null = null;
-      if (maskToPrecip && frame.mask) {
-        // The store carries the HRRR precipitation mask at this pyramid level: no extra downloads.
-        mask = frame.mask;
-        setLayerStatus('ptype-mask', 'ok');
-      } else if (maskToPrecip) {
+      if (maskToPrecip) {
         try {
-          const precip = await Promise.all(PRECIP_SEARCHES.map((s) => fetchHrrrMessage(init, fhour, s)));
-          mask = precipMask(frame.level.grid, precip);
+          // Composite reflectivity above 0 dBZ: unlike the categorical types, it is there at forecast hour 0.
+          mask = await reflectivityMask(init, fhour, frame.level, useApp.getState().activeFields.includes('refc'));
+          setLayerStatus('ptype-mask', 'ok');
         } catch (err) {
-          // Without the HRRR fields the whole domain is shown; say so in the menu.
-          setLayerStatus('ptype-mask', statusFor(err));
+          // Fall back to the store's own mask (HRRR categorical types) when it has one; otherwise the
+          // whole domain is shown, and the menu says so.
+          mask = frame.mask ?? null;
+          setLayerStatus('ptype-mask', mask ? 'ok' : statusFor(err));
         }
-        if (mask) setLayerStatus('ptype-mask', 'ok');
       } else {
         setLayerStatus('ptype-mask', null);
       }
@@ -226,11 +222,12 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
               if (!hasPtypeFrame(store, level, fh) && frameCacheRoom(store, level) < 1) fits = false;
               else {
                 if (showBourgouin && store.hasBourgouin) jobs.push(readPtypeFrame(store, level, fh, 'BOURG'));
-                jobs.push(
-                  readPtypeFrame(store, level, fh).then((frame) =>
-                    maskToPrecip && !frame.mask ? Promise.all(PRECIP_SEARCHES.map(keep)) : undefined,
-                  ),
-                );
+                jobs.push(readPtypeFrame(store, level, fh));
+                // The mask is kept, not the reflectivity field, unless the reflectivity layer needs it anyway.
+                if (maskToPrecip) {
+                  const refcShown = fields.includes('refc');
+                  jobs.push(reflectivityMask(init, fh, store.levels[level], refcShown, refcShown ? keep : undefined).catch(() => undefined));
+                }
               }
             }
             await Promise.all(jobs);

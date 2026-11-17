@@ -70,13 +70,15 @@ They also hold the revised Bourgouin diagnosis (Birk et al. 2021) as `BOURG_rain
 method" layer draws the largest of the four, shaded by its value, in place of the network's layer; cells where all
 four are zero are left blank.
 
-Stores written by `ptype.hrrr_fast` also hold `precip_mask` (uint8, 1 where any HRRR categorical type is
-set) at every level, listed under the root attribute `hrrr_ptype.variables`. When it is there the site masks
-with it and does not download the four categorical fields from NOAA.
+The map shows the most likely class shaded by its probability. By default it is masked to where the HRRR's
+composite reflectivity is above 0 dBZ. That field (`:REFC:entire atmosphere:`) comes straight from NOAA (below),
+one message per forecast hour; `src/map/reflectivityMask.ts` turns it into a mask on the pyramid level in use,
+caches the mask and releases the decoded field. Reflectivity is used because it is instantaneous and so exists
+at forecast hour 0, where the HRRR categorical types are all zero.
 
-The map shows the most likely class shaded by its probability. By default it
-is masked to where the HRRR's own categorical fields report precipitation;
-those come straight from NOAA (below), not from this store.
+Stores written by `ptype.hrrr_fast` also hold `precip_mask` (uint8, 1 where any HRRR categorical type is
+set) at every level, listed under the root attribute `hrrr_ptype.variables`. The site uses it only when the
+reflectivity cannot be fetched; it is empty at forecast hour 0.
 
 ## 2. Soundings (`VITE_SOUNDING_URL`)
 
