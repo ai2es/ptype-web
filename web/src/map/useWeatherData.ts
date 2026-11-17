@@ -156,7 +156,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       if (stale()) return;
       setHoverFrame(frame, mask);
       await layers.setPtype(showPtype ? frame : null, mask, ptypeOpacity);
-      await layers.setUncertainty(showUncertainty ? frame : null, mask);
+      await layers.setUncertainty(showUncertainty ? frame : null, mask, `${init}|${fhour}|${frame.level.path}|${mask ? 'masked' : 'all'}`);
       if (stale()) return;
       setLayerStatus('ptype', 'ok');
       // The revised Bourgouin diagnosis, from the same store and with the same mask, colours and opacity.

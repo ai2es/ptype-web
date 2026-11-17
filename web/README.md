@@ -73,10 +73,10 @@ way for one preloaded 48-hour run with those three layers:
 |---|---|---|---|
 | Decoded HRRR fields | 371 MB | 0 MB | every layer, rasters included, is prebuilt and its field released; the mask keeps only its bytes |
 | Precipitation-type frames | 467 MB | 156 MB | probabilities stored as bytes (steps of 1/254), uncertainty as 16 bits (`src/data/ptype.ts`) |
-| Graphics buffers (lines, labels) | 440 MB | 240 MB | contour labels at a quarter of the density (`LABEL_DENSITY`): they were 70% of a contour layer |
+| Graphics buffers (lines, labels) | 440 MB | 305 MB | contour labels at half the density (`LABEL_DENSITY`): they were 70% of a contour layer. A quarter gave 240 MB but left most lines unlabelled at zoom 10 |
 | Graphics textures | 15 MB | 190 MB | the reflectivity raster now lives here as 16-bit textures, half its decoded size |
 | Masks | 22 MB | 22 MB | |
-| Total | 1,315 MB | 608 MB | |
+| Total | 1,315 MB | 673 MB | |
 
 ## Phones and tablets
 

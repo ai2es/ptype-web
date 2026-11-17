@@ -11,9 +11,9 @@ import type { Map as MapLibreMap } from 'maplibre-gl';
 import { UNCERTAINTY_COLOR } from '../config/ptypeStyle';
 import type { HrrrGridInfo } from '../data/hrrr';
 import { uncertainty, type PtypeFrame } from '../data/ptype';
-import { splitContourLevels } from '../fields/gridops';
+import { smooth, splitContourLevels } from '../fields/gridops';
 import type { FieldData, FieldDef } from '../fields/registry';
-import type { GridDef } from '../geo/lambert';
+import { Lambert, type GridDef } from '../geo/lambert';
 import { isLowMemoryDevice } from '../config/device';
 import { registerMemoryStats } from '../debug/memory';
 import { toFloat16 } from './float16';
@@ -151,6 +151,30 @@ interface Prebuilt {
   pending: Map<string, Promise<void>>;
 }
 
+/** Uncertainty is smoothed over about this distance (box blur radius), whatever the pyramid level. */
+const UNCERTAINTY_SMOOTH_M = 9000;
+
+/** Contours every 0.02, of which only every 0.1 is drawn until the map is zoomed in to a region. */
+const UNCERTAINTY_DEF: FieldDef = {
+  id: 'uncertainty',
+  label: 'Epistemic uncertainty',
+  group: 'Surface',
+  note: '',
+  swatch: UNCERTAINTY_COLOR,
+  load: () => Promise.reject(new Error('uncertainty comes from the precipitation-type store')),
+  style: {
+    type: 'contour',
+    color: UNCERTAINTY_COLOR,
+    interval: 0.02,
+    coarseInterval: 0.1,
+    fineMinZoom: 5.5,
+    lineWidth: (l) => 1 + 1.5 * l,
+    labels: true,
+    // One decimal for the 0.1 lines, two for the ones in between.
+    labelFormat: (l) => l.toFixed(Math.abs(l * 10 - Math.round(l * 10)) < 1e-6 ? 1 : 2),
+  },
+};
+
 /**
  * Every HRRR field is drawn from graphics memory alone once built (lines, barbs, or a 16-bit texture), so its
  * decoded values can be dropped. Kept as a function because callers ask per field.
@@ -226,37 +250,26 @@ export class WeatherLayers {
     });
   }
 
-  /** Draw or update contours of evidential uncertainty. */
-  async setUncertainty(frame: PtypeFrame | null, mask: Uint8Array | null): Promise<void> {
-    if (!frame) return this.remove('uncertainty');
-    const grid = this.projGrid(frame.level.grid);
-    const payload = { frame, mask };
-    await this.apply('uncertainty', projKey(frame.level.grid), payload, () => {
-      const field = (p: typeof payload) => {
-        // Back to floats for contouring; only the frame on screen is ever expanded.
-        const values = Float32Array.from(p.frame.u, (code, k) => (p.mask && !p.mask[k] ? 0 : uncertainty(code)));
-        return new RawScalarField(grid, values);
-      };
-      const contour = new Contour(field(payload), {
-        color: UNCERTAINTY_COLOR,
-        levels: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        line_width: (l) => 1 + 2 * l,
-      });
-      const labels = new ContourLabels(contour, labelOpts((l) => l.toFixed(1), UNCERTAINTY_COLOR));
-      return {
-        components: [
-          { id: 'uncertainty-lines', comp: contour as Comp, anchor: ANCHOR_LINES },
-          { id: 'uncertainty-labels', comp: labels as Comp, anchor: ANCHOR_LINES },
-        ],
-        update: async (p) => {
-          // updateField builds new lines and labels and abandons the old ones without deleting them.
-          const old = { contours: (contour as unknown as { contours: unknown }).contours, text_collection: (labels as unknown as { text_collection: unknown }).text_collection };
-          await contour.updateField(field(p as typeof payload));
-          await labels.updateField();
-          disposeGl(old, this.map.painter.context.gl as WebGLRenderingContext);
-        },
-      };
-    });
+  /**
+   * Draw contours of evidential uncertainty for one frame; pass null to remove them. `key` names the run,
+   * hour and pyramid level, so an hour already built is shown again without recontouring.
+   *
+   * The field is smoothed first (the network's uncertainty is noisy from cell to cell), then cut to the
+   * precipitation mask. Lines are every 0.1 at the national view and every 0.02 once zoomed in.
+   */
+  async setUncertainty(frame: PtypeFrame | null, mask: Uint8Array | null, key = ''): Promise<void> {
+    if (!frame) return this.remove(UNCERTAINTY_DEF.id);
+    if (this.showPrebuilt(UNCERTAINTY_DEF.id, key)) return;
+    const g = frame.level.grid;
+    // Back to floats for contouring; only frames that are drawn are ever expanded.
+    const raw = Float32Array.from(frame.u, uncertainty);
+    const values = smooth(raw, g.ni, g.nj, Math.max(1, Math.round(UNCERTAINTY_SMOOTH_M / g.dx)));
+    // Outside the mask there is nothing to contour: NaN ends the lines at the edge of the precipitation.
+    if (mask) for (let k = 0; k < values.length; k++) if (!mask[k]) values[k] = NaN;
+    const [llLon, llLat] = new Lambert(g).inverse(g.llX, g.llY);
+    const grid: HrrrGridInfo = { ni: g.ni, nj: g.nj, lon0: g.lon0, lat0: g.lat0, latStd: g.latStd, llLon, llLat, dx: g.dx, dy: g.dy };
+    await this.prebuildField(UNCERTAINTY_DEF, key, { kind: 'scalar', grid, values });
+    this.showPrebuilt(UNCERTAINTY_DEF.id, key);
   }
 
   /** True when the layer for this field and key (run and forecast hour) has been built, or is being built. */
@@ -505,10 +518,11 @@ export class WeatherLayers {
 /**
  * autumnplot-gl places labels for the map's closest zoom (10) and hides most of them further out, so nearly
  * all of the label geometry is never seen at the zooms a 9 km contour is read at. Labels were 70% of a
- * contour layer's graphics memory (4.9 of 6.2 MB an hour for sea level pressure). A quarter of the density
- * spaces them as for zoom 8: the same labels up to there, sparser beyond.
+ * contour layer's graphics memory (4.9 of 6.2 MB an hour for sea level pressure). Half the density
+ * spaces them as for zoom 9: the same labels up to there, and still about one per line across the window
+ * at zoom 10 (a quarter left most lines unlabelled there).
  */
-const LABEL_DENSITY = 0.25;
+const LABEL_DENSITY = 0.5;
 
 function labelOpts(format: ((level: number) => string) | undefined, color: string) {
   return {

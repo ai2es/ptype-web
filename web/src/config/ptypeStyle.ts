@@ -38,6 +38,10 @@ export const PTYPE_STYLES: PtypeStyle[] = [
   },
 ];
 
-export const UNCERTAINTY_COLOR = '#1a1a1a';
+/**
+ * Magenta: unlike the near-black it replaces, it cannot be mistaken for the pressure contours, and no
+ * precipitation-type fill or other contour layer uses it.
+ */
+export const UNCERTAINTY_COLOR = '#c000c8';
 /** Lowest probability bin shown in the legend (the winning class is always at least 0.25). */
 export const LEGEND_MIN_PROB = 0.3;
