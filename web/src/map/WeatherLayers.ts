@@ -11,6 +11,7 @@ import type { Map as MapLibreMap } from 'maplibre-gl';
 import { UNCERTAINTY_COLOR } from '../config/ptypeStyle';
 import type { HrrrGridInfo } from '../data/hrrr';
 import type { PtypeFrame } from '../data/ptype';
+import { splitContourLevels } from '../fields/gridops';
 import type { FieldData, FieldDef } from '../fields/registry';
 import type { GridDef } from '../geo/lambert';
 import { ANCHOR_FILLS, ANCHOR_LINES, LABEL_FONT } from './style';
@@ -52,7 +53,8 @@ class KeyedLayer {
   private map: MapLibreMap | null = null;
   private gl: WebGLRenderingContext | null = null;
 
-  constructor(readonly id: string) {}
+  /** `minZoom`: draw only from this map zoom inwards (used for the in-between contour lines). */
+  constructor(readonly id: string, private readonly minZoom = 0) {}
 
   onAdd(map: MapLibreMap, gl: WebGLRenderingContext) {
     this.map = map;
@@ -60,6 +62,7 @@ class KeyedLayer {
   }
 
   render(gl: WebGLRenderingContext, arg: unknown) {
+    if (this.map && this.map.getZoom() < this.minZoom) return;
     const comp = this.active === null ? undefined : this.comps.get(this.active);
     (comp as { render(gl: WebGLRenderingContext, arg: unknown): void } | undefined)?.render(gl, arg);
   }
@@ -169,8 +172,12 @@ export class WeatherLayers {
   prebuildField(def: FieldDef, key: string, data: FieldData): Promise<void> {
     let p = this.prebuilt.get(def.id);
     if (!p) {
-      const names = def.style.type === 'barbs' ? ['barbs'] : def.style.type === 'contour' && def.style.labels ? ['lines', 'labels'] : ['lines'];
-      p = { layers: names.map((n) => new KeyedLayer(`${def.id}-${n}`)), keys: new Set(), pending: new Map() };
+      const st = def.style;
+      const names = st.type === 'barbs' ? ['barbs'] : st.type === 'contour' && st.labels ? ['lines', 'labels'] : ['lines'];
+      const layers = names.map((n) => new KeyedLayer(`${def.id}-${n}`));
+      // A second set of layers holds the in-between lines, which only draw once the map is zoomed in.
+      if (st.type === 'contour' && st.coarseInterval) layers.push(...names.map((n) => new KeyedLayer(`${def.id}-fine-${n}`, st.fineMinZoom ?? 0)));
+      p = { layers, keys: new Set(), pending: new Map() };
       for (const layer of p.layers) this.map.addLayer(layer as never, ANCHOR_LINES);
       this.prebuilt.set(def.id, p);
     }
@@ -193,25 +200,39 @@ export class WeatherLayers {
       await entry.layers[0].add(key, barbs as Comp);
     } else if (style.type === 'contour') {
       if (data.kind !== 'scalar') throw new Error(`${def.id}: expected a scalar field`);
-      const contour = new Contour(new RawScalarField(grid, data.values), {
-        ...(style.cmap ? { cmap: style.cmap } : { color: style.color ?? '#000000' }),
-        ...(style.levels ? { levels: style.levels } : { interval: style.interval ?? 1 }),
-        line_width: style.lineWidth ?? 1.5,
-        line_style: style.lineStyle ?? '-',
-      });
-      // autumnplot-gl keeps these private; they are read here only to learn when the upload has finished.
-      const internals = contour as unknown as { contours: unknown; field: unknown };
-      await entry.layers[0].add(key, contour as Comp);
-      await until(() => internals.contours !== null);
-      if (style.labels) {
-        const labels = new ContourLabels(contour, labelOpts(style.labelFormat, style.color ?? '#111111'));
-        await entry.layers[1].add(key, labels as Comp);
-        // Labels trace the contours once more from the values, so the values must outlive this step.
-        await until(() => (labels as unknown as { text_collection: unknown }).text_collection !== null);
+      const field = new RawScalarField(grid, data.values);
+      const nLayers = style.labels ? 2 : 1;
+      // One set of lines (and labels) per group of levels: all of them, or the coarse ones and the in-between ones.
+      const build = async (levels: { levels: number[] } | { interval: number }, lines: KeyedLayer, labelLayer: KeyedLayer | undefined) => {
+        const contour = new Contour(field, {
+          ...(style.cmap ? { cmap: style.cmap } : { color: style.color ?? '#000000' }),
+          ...levels,
+          line_width: style.lineWidth ?? 1.5,
+          line_style: style.lineStyle ?? '-',
+        });
+        // autumnplot-gl keeps these private; they are read here only to learn when the upload has finished.
+        const internals = contour as unknown as { contours: unknown; field: unknown };
+        await lines.add(key, contour as Comp);
+        await until(() => internals.contours !== null);
+        if (labelLayer) {
+          const labels = new ContourLabels(contour, labelOpts(style.labelFormat, style.color ?? '#111111'));
+          await labelLayer.add(key, labels as Comp);
+          // Labels trace the contours once more from the values, so the values must outlive this step.
+          await until(() => (labels as unknown as { text_collection: unknown }).text_collection !== null);
+        }
+        // Lines and labels are now GPU buffers. Dropping the component's reference to the values lets the
+        // ~7.6 MB array be collected. Nothing reads it again: we never call updateField on a prebuilt component.
+        internals.field = null;
+      };
+      if (style.coarseInterval) {
+        const split = splitContourLevels(data.values, style.interval ?? 1, style.coarseInterval);
+        const jobs: Promise<void>[] = [];
+        if (split.coarse.length > 0) jobs.push(build({ levels: split.coarse }, entry.layers[0], style.labels ? entry.layers[1] : undefined));
+        if (split.fine.length > 0) jobs.push(build({ levels: split.fine }, entry.layers[nLayers], style.labels ? entry.layers[nLayers + 1] : undefined));
+        await Promise.all(jobs);
+      } else {
+        await build(style.levels ? { levels: style.levels } : { interval: style.interval ?? 1 }, entry.layers[0], style.labels ? entry.layers[1] : undefined);
       }
-      // Lines and labels are now GPU buffers. Dropping the component's reference to the values lets the
-      // ~7.6 MB array be collected. Nothing reads it again: we never call updateField on a prebuilt component.
-      internals.field = null;
     } else {
       throw new Error(`${def.id}: only contour and barb layers can be prebuilt`);
     }
