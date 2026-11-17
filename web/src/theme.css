@@ -65,6 +65,11 @@ button, select, input { font: inherit; color: inherit; }
 .transport { display: flex; gap: 4px; }
 .slider-wrap { flex: 1; min-width: 180px; position: relative; padding-bottom: 14px; }
 .slider-wrap input { width: 100%; accent-color: var(--ncar-blue); margin: 0; }
+/* Hours already in memory, drawn under the slider like a video player's buffer bar. */
+.slider-buffer { position: absolute; left: 8px; right: 8px; top: 17px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.slider-buffer span { position: absolute; top: 0; bottom: 0; background: var(--ncar-blue); opacity: 0.55; }
+.preload { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.preload-status { display: inline-block; min-width: 3.2em; color: var(--gray-11); font-variant-numeric: tabular-nums; }
 .slider-scale { position: absolute; left: 8px; right: 8px; bottom: 0; height: 12px; font-size: 10px; color: var(--gray-11); }
 .slider-scale span { position: absolute; transform: translateX(-50%); }
 .valid { display: flex; align-items: center; gap: 10px; }

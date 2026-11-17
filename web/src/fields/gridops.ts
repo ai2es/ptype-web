@@ -66,3 +66,22 @@ export function wetBulbStull(tC: number, tdC: number): number {
     4.686035
   );
 }
+
+/**
+ * Contour levels spanning the data, split into the ones drawn at every zoom (multiples of `coarse`) and the
+ * in-between ones (other multiples of `interval`) that are added when zoomed in.
+ */
+export function splitContourLevels(values: Float32Array, interval: number, coarse: number): { coarse: number[]; fine: number[] } {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let k = 0; k < values.length; k++) {
+    const v = values[k];
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  const out = { coarse: [] as number[], fine: [] as number[] };
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return out;
+  const step = Math.round(coarse / interval);
+  for (let n = Math.ceil(lo / interval); n * interval <= hi; n++) (n % step === 0 ? out.coarse : out.fine).push(n * interval);
+  return out;
+}

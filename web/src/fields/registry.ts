@@ -20,6 +20,12 @@ export type FieldStyle =
       color?: string;
       cmap?: ColorMap;
       interval?: number;
+      /**
+       * Draw only every `coarseInterval` when the map is zoomed out, and the remaining `interval` lines from
+       * zoom `fineMinZoom` inwards. Must be a multiple of `interval`.
+       */
+      coarseInterval?: number;
+      fineMinZoom?: number;
       levels?: number[];
       lineWidth?: number | ((level: number) => number);
       lineStyle?: LineStyle | ((level: number) => LineStyle);
@@ -45,11 +51,23 @@ const K = 273.15;
 /** Contoured fields are smoothed and thinned to every 3rd point (9 km) to keep contours clean and fast. */
 const CONTOUR_THIN = 3;
 
+/**
+ * Box-blur radius, in 3 km grid points, for temperature-like fields. Near-surface temperature follows the
+ * terrain closely, so it needs more smoothing than pressure or height to give readable contours.
+ */
+const TEMPERATURE_SMOOTH = 6;
+
 function contourField(msg: HrrrMessage, values: Float32Array, radius = 4): FieldData {
   const sm = smooth(values, msg.grid.ni, msg.grid.nj, radius);
   const t = thin(sm, msg.grid, CONTOUR_THIN);
   return { kind: 'scalar', grid: t.grid, values: t.data };
 }
+
+/**
+ * Temperature contours every 4 °C at the national view and every 2 °C once zoomed in to a region. The map opens
+ * at zoom 4.4; 5.5 is roughly where a few states fill the window.
+ */
+const ZOOMED_OUT_4C = { coarseInterval: 4, fineMinZoom: 5.5 };
 
 const zeroBold = (level: number) => (level === 0 ? 2.5 : 1);
 const negDashed = (level: number): LineStyle => (level < 0 ? '--' : '-');
@@ -59,13 +77,13 @@ function celsiusContour(id: string, label: string, group: FieldDef['group'], sea
     id,
     label,
     group,
-    note: 'every 2 °C, 0 °C bold, below freezing dashed',
+    note: 'every 4 °C (2 °C when zoomed in), 0 °C bold, below freezing dashed',
     swatch: color,
     load: async (fetch) => {
       const msg = await fetch(search);
-      return contourField(msg, mapValues(msg.data, (v) => v - K));
+      return contourField(msg, mapValues(msg.data, (v) => v - K), TEMPERATURE_SMOOTH);
     },
-    style: { type: 'contour', color, interval: 2, lineWidth: zeroBold, lineStyle: negDashed, labels: true },
+    style: { type: 'contour', color, interval: 2, ...ZOOMED_OUT_4C, lineWidth: zeroBold, lineStyle: negDashed, labels: true },
   };
 }
 
@@ -83,13 +101,13 @@ export const FIELDS: FieldDef[] = [
     id: 'wb2m',
     label: '2 m wet-bulb temperature',
     group: 'Surface',
-    note: 'every 2 °C, 0 °C bold, below freezing dashed',
+    note: 'every 4 °C (2 °C when zoomed in), 0 °C bold, below freezing dashed',
     swatch: '#0277bd',
     load: async (fetch) => {
       const [t, td] = await Promise.all([fetch(':TMP:2 m above ground:'), fetch(':DPT:2 m above ground:')]);
-      return contourField(t, combine(t.data, td.data, (a, b) => wetBulbStull(a - K, b - K)));
+      return contourField(t, combine(t.data, td.data, (a, b) => wetBulbStull(a - K, b - K)), TEMPERATURE_SMOOTH);
     },
-    style: { type: 'contour', color: '#0277bd', interval: 2, lineWidth: zeroBold, lineStyle: negDashed, labels: true },
+    style: { type: 'contour', color: '#0277bd', interval: 2, ...ZOOMED_OUT_4C, lineWidth: zeroBold, lineStyle: negDashed, labels: true },
   },
   {
     id: 'mslp',

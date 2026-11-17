@@ -15,9 +15,24 @@ export interface Prediction {
   u: number;
 }
 
+/**
+ * Winds as the network expects them: relative to the HRRR grid. Stored
+ * soundings hold earth-relative winds (so the hodograph and barbs are true),
+ * with u_earth = cos(a) u_grid + sin(a) v_grid and v_earth = -sin(a) u_grid +
+ * cos(a) v_grid; this applies the inverse rotation.
+ */
+export function gridRelativeWind(profile: Profile): [number[], number[]] {
+  const a = profile.gridAngle;
+  if (!a) return [profile.u, profile.v];
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return [profile.u.map((ue, k) => c * ue - s * profile.v[k]), profile.u.map((ue, k) => s * ue + c * profile.v[k])];
+}
+
 /** Build the scaled input vector: T, Td, U, V, each surface to top. */
 export function buildInput(profile: Profile, meta: ModelMeta): Float32Array {
-  const groups = [profile.t, profile.td, profile.u, profile.v];
+  const [u, v] = gridRelativeWind(profile);
+  const groups = [profile.t, profile.td, u, v];
   const nLev = meta.heights_m.length;
   const out = new Float32Array(groups.length * nLev);
   groups.forEach((values, g) => {

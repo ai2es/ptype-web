@@ -9,11 +9,25 @@ export function TimeBar() {
   const frameMs = useApp((s) => s.frameMs);
   const manifest = useApp((s) => s.manifest);
   const layerStatus = useApp((s) => s.layerStatus);
+  const preloadRun = useApp((s) => s.preloadRun);
+  const prefetch = useApp((s) => s.prefetch);
   const { setFhour, stepFhour, setPlaying, setFrameMs } = useApp.getState();
 
   const max = maxFhour(init);
   const entry = init ? manifest?.get(init) : undefined;
   const loading = Object.values(layerStatus).includes('loading');
+  // The hour on screen counts as in memory once its layers have drawn.
+  const buffered = preloadRun && prefetch ? [...new Set([...prefetch.ready, ...(loading ? [] : [fhour])])] : [];
+  // Fixed-width text so the bar does not shift as the count changes.
+  const preloadLabel = !preloadRun || !prefetch
+    ? ''
+    : prefetch.active
+      ? `${prefetch.ready.length + 1}/${max + 1}`
+      : prefetch.limited
+        ? `${prefetch.ready.length + 1}/${max + 1} (memory limit)`
+        : prefetch.failed.length > 0
+          ? `${prefetch.ready.length + 1}/${max + 1}`
+          : 'ready';
   const pause = (fn: () => void) => () => {
     setPlaying(false);
     fn();
@@ -44,6 +58,11 @@ export function TimeBar() {
             setFhour(Number(e.target.value));
           }}
         />
+        <div className="slider-buffer" aria-hidden="true">
+          {buffered.map((h) => (
+            <span key={h} style={{ left: `${(Math.max(0, h - 0.5) / max) * 100}%`, width: `${((Math.min(max, h + 0.5) - Math.max(0, h - 0.5)) / max) * 100}%` }} />
+          ))}
+        </div>
         <div className="slider-scale" aria-hidden="true">
           {Array.from({ length: Math.floor(max / 6) + 1 }, (_, k) => k * 6).map((h) => (
             <span key={h} style={{ left: `${(h / max) * 100}%` }}>{h}</span>
@@ -57,6 +76,11 @@ export function TimeBar() {
           {loading ? 'Loading…' : entry?.forecastHours.includes(fhour) ? 'Precip type available' : 'HRRR fields only'}
         </span>
       </div>
+      <label className="preload" title="Load the selected layers for every forecast hour of this run in the background, so stepping and animation do not wait">
+        <input type="checkbox" checked={preloadRun} onChange={(e) => useApp.getState().set({ preloadRun: e.target.checked })} />
+        Preload run
+        <span className="preload-status" role="status">{preloadLabel}</span>
+      </label>
       <label className="speed">
         Speed
         <select value={frameMs} onChange={(e) => setFrameMs(Number(e.target.value))} aria-label="Animation speed">

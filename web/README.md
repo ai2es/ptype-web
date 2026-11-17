@@ -15,9 +15,9 @@ npm install
 npm run dev
 ```
 
-Then open the URL Vite prints. Without sample data you still get the map and
-all HRRR fields for any run on NOAA's bucket; the precipitation-type layer and
-soundings need the stores below.
+Then open the URL Vite prints. The precipitation-type layer and soundings are
+read from the `wwe-ptype` S3 bucket by default; its access policy admits this
+site and `localhost` dev servers. HRRR fields come from NOAA's bucket for any run.
 
 ### Sample data
 
@@ -32,8 +32,25 @@ files to get an animation.
 
 ### Real data
 
-Copy `.env.example` to `.env.local` and set the bucket URLs. The layouts the
-site expects are in [docs/data-schema.md](docs/data-schema.md).
+Nothing needs to be configured to read the bucket. To read other stores, or the
+sample data (`VITE_PTYPE_URL=sample-data/ptype`,
+`VITE_SOUNDING_URL=sample-data/soundings.zarr`), copy `.env.example` to
+`.env.local`. The layouts the site expects are in [docs/data-schema.md](docs/data-schema.md).
+
+## Background loading
+
+With "Preload run" ticked in the time bar (the default), the layers that are switched on are loaded for every
+forecast hour of the selected run in the background, nearest hours first, two hours at a time. The thin bar
+under the slider shows which hours are in memory. Decoded HRRR fields are about 7.6 MB each, so the caches are
+capped (about 80 fields and 512 MB of precipitation-type frames on a desktop); a long run with several fields
+stops at "memory limit" and carries on from wherever you move to. The logic is in `src/data/prefetch.ts`.
+
+Contour and wind-barb layers are kept as one finished layer per forecast hour (`prebuildField` in
+`src/map/WeatherLayers.ts`), and the decoded GRIB data behind them is released once the layer is built, so they
+do not count against that limit. This moves the memory to the graphics card instead of removing it: measured on
+a 48-hour run, mean sea level pressure took at most about 4 MB of line geometry per hour and 2 m temperature
+5.8 MB (7.1 MB before its smoothing was widened from 4 to 6 grid points), against 7.6 MB for the decoded field. Up to 64 hours per field are kept. Filled and raster layers
+still need their values and are loaded as before.
 
 ## Commands
 
@@ -47,8 +64,8 @@ site expects are in [docs/data-schema.md](docs/data-schema.md).
 ## Deploying
 
 `.github/workflows/deploy-web.yml` builds and publishes to GitHub Pages on pushes
-to `main`. Set the data URLs as repository variables (see the comment at the top
-of that file). The build uses relative paths, so it works at
+to `main`. Data URLs default to the `wwe-ptype` bucket; repository variables
+override them (see the comment at the top of that file). The build uses relative paths, so it works at
 `https://<org>.github.io/ptype-web/` and at a custom domain without changes.
 
 ## Where things are
