@@ -6,6 +6,9 @@ export interface ModelMeta {
   heights_m: number[];
   input_groups: string[];
   scaler: { center: number[]; scale: number[] };
+  /** Layer sizes and activation slope for the plain-JavaScript fallback (model/denseNet.ts). */
+  dense_layers?: [number, number][];
+  leaky_relu_alpha?: number;
 }
 
 export interface Prediction {

@@ -1,5 +1,6 @@
 /** Application state. Components read slices with `useApp(selector)`. */
 import { create } from 'zustand';
+import { isLowMemoryDevice } from '../config/device';
 import type { Manifest } from '../data/manifest';
 import type { PrefetchProgress } from '../data/prefetch';
 import type { Prediction } from '../model/evidential';
@@ -87,7 +88,8 @@ export const useApp = create<AppState>((set, get) => ({
   showUncertainty: false,
   boundaries: { states: true, counties: false, cwas: false, highways: true, cities: true },
   layerStatus: {},
-  preloadRun: true,
+  // Off by default on phones and tablets: a whole run can exceed what their browsers allow one tab.
+  preloadRun: !isLowMemoryDevice(),
   prefetch: null,
   sounding: { status: 'idle' },
   editSigma: 2,

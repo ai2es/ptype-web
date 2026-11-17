@@ -14,6 +14,8 @@ import type { PtypeFrame } from '../data/ptype';
 import { splitContourLevels } from '../fields/gridops';
 import type { FieldData, FieldDef } from '../fields/registry';
 import type { GridDef } from '../geo/lambert';
+import { isLowMemoryDevice } from '../config/device';
+import { toFloat16 } from './float16';
 import { ANCHOR_FILLS, ANCHOR_LINES, LABEL_FONT } from './style';
 import { PTYPE_CMAP, dominantField } from './ptypeField';
 
@@ -28,8 +30,11 @@ interface Slot {
 
 const HRRR_RADIUS = 6371229;
 
-/** Prebuilt hours kept per field; the oldest is dropped beyond this (a 48-hour run plus slack). */
-const MAX_PREBUILT_HOURS = 64;
+/**
+ * Prebuilt hours kept per field; the oldest is dropped beyond this. A 48-hour run plus slack on a desktop;
+ * a dozen on phones and tablets, where each hour is several megabytes of graphics memory.
+ */
+const MAX_PREBUILT_HOURS = isLowMemoryDevice() ? 12 : 64;
 
 /** Resolve once `ready()` is true; plot components finish their GPU upload a little after `onAdd` returns. */
 async function until(ready: () => boolean, timeoutMs = 20000): Promise<void> {
@@ -119,7 +124,7 @@ export class WeatherLayers {
     const key = `${projKey(frame.level.grid)}|${opacity}`;
     const payload = { frame, mask };
     await this.apply('ptype', key, payload, () => {
-      const field = (p: typeof payload) => new RawScalarField(grid, dominantField(p.frame, p.mask));
+      const field = (p: typeof payload) => new RawScalarField(grid, toFloat16(dominantField(p.frame, p.mask)));
       const raster = new Raster(field(payload), { cmap: PTYPE_CMAP, opacity });
       return {
         components: [{ id: 'ptype-raster', comp: raster as Comp, anchor: ANCHOR_FILLS }],
@@ -196,7 +201,7 @@ export class WeatherLayers {
     if (style.type === 'barbs') {
       if (data.kind !== 'vector') throw new Error(`${def.id}: expected a vector field`);
       // The registry has already thinned the winds, so the barbs hold only a small copy.
-      const barbs = new Barbs(new RawVectorField(grid, data.u, data.v, { relative_to: 'grid' }), { color: style.color, thin_fac: style.thinFac, line_width: 1.5 });
+      const barbs = new Barbs(new RawVectorField(grid, toFloat16(data.u), toFloat16(data.v), { relative_to: 'grid' }), { color: style.color, thin_fac: style.thinFac, line_width: 1.5 });
       await entry.layers[0].add(key, barbs as Comp);
     } else if (style.type === 'contour') {
       if (data.kind !== 'scalar') throw new Error(`${def.id}: expected a scalar field`);
@@ -322,7 +327,7 @@ export class WeatherLayers {
     if (style.type === 'barbs') {
       const vector = (d: FieldData) => {
         if (d.kind !== 'vector') throw new Error(`${def.id}: expected a vector field`);
-        return new RawVectorField(grid, d.u, d.v, { relative_to: 'grid' });
+        return new RawVectorField(grid, toFloat16(d.u), toFloat16(d.v), { relative_to: 'grid' });
       };
       const barbs = new Barbs(vector(first), { color: style.color, thin_fac: style.thinFac, line_width: 1.5 });
       return {
@@ -331,10 +336,15 @@ export class WeatherLayers {
       };
     }
     const Fill = style.type === 'raster' ? Raster : ContourFill;
-    const fill = new Fill(scalar(first), { cmap: style.cmap, opacity: style.opacity });
+    // Drawn from a texture, so 16-bit (see float16.ts); `scalar` above keeps 32 bits for contouring.
+    const texture = (d: FieldData) => {
+      if (d.kind !== 'scalar') throw new Error(`${def.id}: expected a scalar field`);
+      return new RawScalarField(grid, toFloat16(d.values));
+    };
+    const fill = new Fill(texture(first), { cmap: style.cmap, opacity: style.opacity });
     return {
       components: [{ id: `${def.id}-fill`, comp: fill as Comp, anchor: ANCHOR_FILLS }],
-      update: (d: unknown) => fill.updateField(scalar(d as FieldData)),
+      update: (d: unknown) => fill.updateField(texture(d as FieldData)),
     };
   }
 
