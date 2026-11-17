@@ -4,9 +4,16 @@ import { editThermo, type EditOptions, type Profile } from './profile';
 const M = { top: 10, right: 54, bottom: 26, left: 40 };
 const P_BASE = 1050;
 const P_TOP = 450;
-const T_MIN = -35;
-const T_MAX = 30;
-const SKEW = 1 / Math.tan((55 * Math.PI) / 180);
+const T_MIN = -30;
+const T_MAX = 40;
+/** Isotherms lean at 55° from the horizontal when the plot is wide enough for that. */
+const MAX_SKEW = 1 / Math.tan((55 * Math.PI) / 180);
+/**
+ * The 0 °C isotherm must stay inside the plot all the way up, so the melting and refreezing layers can be read
+ * to 5 km. It starts 43% of the way across (0 °C between -30 and 40) and may use this much more of the width
+ * by the top. In a tall, narrow panel that means leaning the isotherms less than 55°.
+ */
+const ZERO_LINE_REACH = 0.5;
 const ISOBARS = [1000, 925, 850, 700, 600, 500];
 const T_COLOR = '#c62828';
 const TD_COLOR = '#2e7d32';
@@ -16,7 +23,8 @@ function geometry(W: number, H: number) {
   const w = Math.max(W - M.left - M.right, 60);
   const h = Math.max(H - M.top - M.bottom, 60);
   const yOf = (p: number) => (h * Math.log(p / P_TOP)) / Math.log(P_BASE / P_TOP);
-  const xOf = (t: number, p: number) => ((t - T_MIN) / (T_MAX - T_MIN)) * w + (h - yOf(p)) * SKEW;
+  const skew = Math.min(MAX_SKEW, (ZERO_LINE_REACH * w) / h);
+  const xOf = (t: number, p: number) => ((t - T_MIN) / (T_MAX - T_MIN)) * w + (h - yOf(p)) * skew;
   return { W, H, w, h, yOf, xOf, degPerPx: (T_MAX - T_MIN) / w };
 }
 type Geometry = ReturnType<typeof geometry>;
