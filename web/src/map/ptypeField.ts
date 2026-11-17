@@ -24,6 +24,7 @@ export const PTYPE_CMAP = (() => {
 })();
 
 const HIDDEN = -1;
+export const MAX_FRACTION = 0.99;
 
 export function dominantField(frame: PtypeFrame, mask: Uint8Array | null): Float32Array {
   const n = frame.u.length;
@@ -42,7 +43,9 @@ export function dominantField(frame: PtypeFrame, mask: Uint8Array | null): Float
         best = c;
       }
     }
-    out[k] = Number.isNaN(bestP) ? HIDDEN : best + Math.min(Math.max(bestP, 0), 0.9999);
+    // The value is class + probability. It is stored as a 16-bit float for drawing, whose steps near 4 are
+    // 1/512, so the probability is capped where rounding cannot carry it into the next class.
+    out[k] = Number.isNaN(bestP) ? HIDDEN : best + Math.min(Math.max(bestP, 0), MAX_FRACTION);
   }
   return out;
 }

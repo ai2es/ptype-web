@@ -1,5 +1,6 @@
 /** Reads precipitation-type probabilities from a topozarr (multiscale Zarr v3) store. */
 import * as zarr from 'zarrita';
+import { isLowMemoryDevice } from '../config/device';
 import { parseProj4Lambert, type GridDef } from '../geo/lambert';
 
 export const PTYPE_CLASSES = ['rain', 'snow', 'icep', 'frzr'] as const;
@@ -103,7 +104,7 @@ const frameSizes = new Map<string, number>();
  * Frames are cached by size, not count: one hour is about 2 MB at the coarsest
  * pyramid level and 40 MB at the native 3 km grid.
  */
-const MAX_FRAME_BYTES = 512 * 1024 * 1024;
+const MAX_FRAME_BYTES = (isLowMemoryDevice() ? 96 : 512) * 1024 * 1024;
 
 function frameSize(level: PtypeLevel, withMask: boolean): number {
   return level.grid.ni * level.grid.nj * (5 * 4 + (withMask ? 1 : 0));

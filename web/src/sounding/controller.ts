@@ -18,7 +18,10 @@ async function runModel(profile: Profile, isOriginal: boolean) {
     );
   } catch (err) {
     console.error(err);
-    if (gen === predictGen) useApp.getState().setSounding({ modelError: 'The model could not be loaded.' });
+    // Say why: on phones and tablets the usual cause is the tab running out of memory, which reads very
+    // differently from a missing file.
+    const reason = err instanceof Error ? err.message : String(err);
+    if (gen === predictGen) useApp.getState().setSounding({ modelError: `The model could not be loaded. (${reason.slice(0, 160)})` });
   }
 }
 

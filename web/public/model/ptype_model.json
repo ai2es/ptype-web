@@ -55,5 +55,32 @@
     "alpha": "relu(output) + 1",
     "prob": "alpha / sum(alpha)",
     "u": "n_classes / sum(alpha)"
-  }
+  },
+  "dense_layers": [
+    [
+      84,
+      84
+    ],
+    [
+      84,
+      200
+    ],
+    [
+      200,
+      200
+    ],
+    [
+      200,
+      200
+    ],
+    [
+      200,
+      200
+    ],
+    [
+      200,
+      4
+    ]
+  ],
+  "leaky_relu_alpha": 0.2
 }

@@ -52,6 +52,16 @@ a 48-hour run, mean sea level pressure took at most about 4 MB of line geometry 
 5.8 MB (7.1 MB before its smoothing was widened from 4 to 6 grid points), against 7.6 MB for the decoded field. Up to 64 hours per field are kept. Filled and raster layers
 still need their values and are loaded as before.
 
+## Phones and tablets
+
+- Filled and raster layers and wind barbs are sent to the graphics card as 16-bit floats (`src/map/float16.ts`):
+  iOS cannot use 32-bit float textures and autumnplot-gl refuses them there.
+- On phones and tablets (`src/config/device.ts`) "Preload run" starts switched off and the caches are much
+  smaller, because one browser tab gets far less memory than on a desktop.
+- If ONNX Runtime's WebAssembly build cannot start, the same network runs in plain JavaScript from
+  `public/model/ptype_model_weights.bin` (`src/model/denseNet.ts`). Regenerate that file with
+  `python tools/export_weights.py public/model` whenever the ONNX model changes.
+
 ## Commands
 
 | Command | What it does |
