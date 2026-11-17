@@ -101,6 +101,11 @@ export function fetchHrrrMessage(init: InitIso, fhour: number, search: string): 
   return p;
 }
 
+/** Forget a decoded message, once whatever needed its values has been built. */
+export function releaseHrrrMessage(init: InitIso, fhour: number, search: string): void {
+  messages.delete(`${hrrrGribUrl(init, fhour)}|${search}`);
+}
+
 /** True when the run's file for this forecast hour exists on the bucket. */
 export async function hrrrAvailable(init: InitIso, fhour: number): Promise<boolean> {
   try {

@@ -27,9 +27,77 @@ interface Slot {
 
 const HRRR_RADIUS = 6371229;
 
+/** Prebuilt hours kept per field; the oldest is dropped beyond this (a 48-hour run plus slack). */
+const MAX_PREBUILT_HOURS = 64;
+
+/** Resolve once `ready()` is true; plot components finish their GPU upload a little after `onAdd` returns. */
+async function until(ready: () => boolean, timeoutMs = 20000): Promise<void> {
+  const started = performance.now();
+  while (!ready()) {
+    if (performance.now() - started > timeoutMs) throw new Error('Timed out building a map layer');
+    await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
+/**
+ * A MapLibre custom layer holding one finished plot component per key (run and
+ * forecast hour) and drawing whichever is active. autumnplot-gl's own
+ * MultiPlotLayer does the same but cannot forget a key, and a run's worth of
+ * hours has to be released when the user moves on.
+ */
+class KeyedLayer {
+  readonly type = 'custom' as const;
+  private readonly comps = new Map<string, Comp>();
+  private active: string | null = null;
+  private map: MapLibreMap | null = null;
+  private gl: WebGLRenderingContext | null = null;
+
+  constructor(readonly id: string) {}
+
+  onAdd(map: MapLibreMap, gl: WebGLRenderingContext) {
+    this.map = map;
+    this.gl = gl;
+  }
+
+  render(gl: WebGLRenderingContext, arg: unknown) {
+    const comp = this.active === null ? undefined : this.comps.get(this.active);
+    (comp as { render(gl: WebGLRenderingContext, arg: unknown): void } | undefined)?.render(gl, arg);
+  }
+
+  /** Hand the component its GL context (which starts its build) and keep it under `key`. */
+  async add(key: string, comp: Comp): Promise<void> {
+    if (!this.map || !this.gl) throw new Error(`Layer ${this.id} is not on the map`);
+    await (comp as unknown as { onAdd(map: MapLibreMap, gl: WebGLRenderingContext): Promise<void> }).onAdd(this.map, this.gl);
+    this.comps.set(key, comp);
+  }
+
+  show(key: string | null) {
+    this.active = key;
+    this.map?.triggerRepaint();
+  }
+
+  drop(key: string) {
+    this.comps.delete(key);
+    if (this.active === key) this.active = null;
+  }
+}
+
+interface Prebuilt {
+  layers: KeyedLayer[];
+  /** Keys in the order they were built or last shown, oldest first. */
+  keys: Set<string>;
+  pending: Map<string, Promise<void>>;
+}
+
+/** Contours and wind barbs become GPU geometry, so their data can be dropped once a layer is built. */
+export function canPrebuild(def: FieldDef): boolean {
+  return def.style.type === 'contour' || def.style.type === 'barbs';
+}
+
 export class WeatherLayers {
   private readonly slots = new Map<string, Slot>();
   private readonly grids = new Map<string, AnyGrid>();
+  private readonly prebuilt = new Map<string, Prebuilt>();
 
   constructor(private readonly map: MapLibreMap) {}
 
@@ -86,7 +154,92 @@ export class WeatherLayers {
     });
   }
 
+  /** True when the layer for this field and key (run and forecast hour) has been built, or is being built. */
+  hasPrebuilt(id: string, key: string): boolean {
+    const p = this.prebuilt.get(id);
+    return !!p && (p.keys.has(key) || p.pending.has(key));
+  }
+
+  /**
+   * Build the layer for one forecast hour of a contour or barb field without
+   * showing it. Afterwards the field's values are no longer needed: contour
+   * lines and their labels live on the graphics card, so the caller can let
+   * the decoded GRIB data go. Concurrent calls for the same key share one build.
+   */
+  prebuildField(def: FieldDef, key: string, data: FieldData): Promise<void> {
+    let p = this.prebuilt.get(def.id);
+    if (!p) {
+      const names = def.style.type === 'barbs' ? ['barbs'] : def.style.type === 'contour' && def.style.labels ? ['lines', 'labels'] : ['lines'];
+      p = { layers: names.map((n) => new KeyedLayer(`${def.id}-${n}`)), keys: new Set(), pending: new Map() };
+      for (const layer of p.layers) this.map.addLayer(layer as never, ANCHOR_LINES);
+      this.prebuilt.set(def.id, p);
+    }
+    const entry = p;
+    if (entry.keys.has(key)) return Promise.resolve();
+    const running = entry.pending.get(key);
+    if (running) return running;
+    const job = this.buildPrebuilt(def, entry, key, data).finally(() => entry.pending.delete(key));
+    entry.pending.set(key, job);
+    return job;
+  }
+
+  private async buildPrebuilt(def: FieldDef, entry: Prebuilt, key: string, data: FieldData): Promise<void> {
+    const grid = this.hrrrGrid(data.grid);
+    const style = def.style;
+    if (style.type === 'barbs') {
+      if (data.kind !== 'vector') throw new Error(`${def.id}: expected a vector field`);
+      // The registry has already thinned the winds, so the barbs hold only a small copy.
+      const barbs = new Barbs(new RawVectorField(grid, data.u, data.v, { relative_to: 'grid' }), { color: style.color, thin_fac: style.thinFac, line_width: 1.5 });
+      await entry.layers[0].add(key, barbs as Comp);
+    } else if (style.type === 'contour') {
+      if (data.kind !== 'scalar') throw new Error(`${def.id}: expected a scalar field`);
+      const contour = new Contour(new RawScalarField(grid, data.values), {
+        ...(style.cmap ? { cmap: style.cmap } : { color: style.color ?? '#000000' }),
+        ...(style.levels ? { levels: style.levels } : { interval: style.interval ?? 1 }),
+        line_width: style.lineWidth ?? 1.5,
+        line_style: style.lineStyle ?? '-',
+      });
+      // autumnplot-gl keeps these private; they are read here only to learn when the upload has finished.
+      const internals = contour as unknown as { contours: unknown; field: unknown };
+      await entry.layers[0].add(key, contour as Comp);
+      await until(() => internals.contours !== null);
+      if (style.labels) {
+        const labels = new ContourLabels(contour, labelOpts(style.labelFormat, style.color ?? '#111111'));
+        await entry.layers[1].add(key, labels as Comp);
+        // Labels trace the contours once more from the values, so the values must outlive this step.
+        await until(() => (labels as unknown as { text_collection: unknown }).text_collection !== null);
+      }
+      // Lines and labels are now GPU buffers. Dropping the component's reference to the values lets the
+      // ~7.6 MB array be collected. Nothing reads it again: we never call updateField on a prebuilt component.
+      internals.field = null;
+    } else {
+      throw new Error(`${def.id}: only contour and barb layers can be prebuilt`);
+    }
+    entry.keys.add(key);
+    while (entry.keys.size > MAX_PREBUILT_HOURS) {
+      const oldest = entry.keys.values().next().value!;
+      entry.keys.delete(oldest);
+      for (const layer of entry.layers) layer.drop(oldest);
+    }
+  }
+
+  /** Show a prebuilt hour of a field. False if it has not been built. */
+  showPrebuilt(id: string, key: string): boolean {
+    const p = this.prebuilt.get(id);
+    if (!p || !p.keys.has(key)) return false;
+    // Mark as most recently used, so the hours around the one on screen are the last to be dropped.
+    p.keys.delete(key);
+    p.keys.add(key);
+    for (const layer of p.layers) layer.show(key);
+    return true;
+  }
+
   remove(id: string): void {
+    const pre = this.prebuilt.get(id);
+    if (pre) {
+      for (const layer of pre.layers) if (this.map.getLayer(layer.id)) this.map.removeLayer(layer.id);
+      this.prebuilt.delete(id);
+    }
     const slot = this.slots.get(id);
     if (!slot) return;
     for (const layerId of slot.layerIds) if (this.map.getLayer(layerId)) this.map.removeLayer(layerId);

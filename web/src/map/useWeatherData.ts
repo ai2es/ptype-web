@@ -1,6 +1,6 @@
 /** Loads the data for the selected time and hands it to the map layers. */
 import { useEffect, useRef, useState } from 'react';
-import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity } from '../data/hrrr';
+import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity, releaseHrrrMessage } from '../data/hrrr';
 import { storeUrl } from '../data/manifest';
 import { prefetchOrder, startPrefetch, stopPrefetch } from '../data/prefetch';
 import { chooseLevel, frameCacheRoom, hasPtypeFrame, openPtypeStore, readPtypeFrame } from '../data/ptype';
@@ -9,7 +9,7 @@ import { maxFhour, useApp } from '../state/store';
 import type { InitIso } from '../time/times';
 import { setHoverFrame } from './hoverData';
 import { precipMask } from './ptypeField';
-import type { WeatherLayers } from './WeatherLayers';
+import { canPrebuild, type WeatherLayers } from './WeatherLayers';
 
 const PRECIP_SEARCHES = [':CRAIN:surface:', ':CSNOW:surface:', ':CICEP:surface:', ':CFRZR:surface:'];
 
@@ -55,12 +55,27 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       const def = FIELD_BY_ID.get(id);
       if (!def) continue;
       drawn.current.add(id);
+      const layerId = `field-${id}`;
+      const hourKey = `${init}|${fhour}`;
+      // Contours and barbs are kept as one finished layer per hour, so a preloaded hour needs no data at all.
+      if (canPrebuild(def) && layers.showPrebuilt(layerId, hourKey)) {
+        setLayerStatus(id, 'ok');
+        continue;
+      }
       setLayerStatus(id, 'loading');
       def
         .load((search) => fetchHrrrMessage(init, fhour, search))
         .then(async (data) => {
+          if (canPrebuild(def)) {
+            // Build even if the user has moved on: the hour stays available for when they come back.
+            await layers.prebuildField({ ...def, id: layerId }, hourKey, data);
+            if (gen !== fieldGen.current) return;
+            layers.showPrebuilt(layerId, hourKey);
+            setLayerStatus(id, 'ok');
+            return;
+          }
           if (gen !== fieldGen.current) return;
-          await layers.setField({ ...def, id: `field-${id}` }, data);
+          await layers.setField({ ...def, id: layerId }, data);
           if (gen === fieldGen.current) setLayerStatus(id, 'ok');
         })
         .catch((err) => {
@@ -165,7 +180,27 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
           messageBudget: messageCacheCapacity() - 10,
           fetchMessage: (fh, search) => fetchHrrrMessage(init, fh, search),
           loadHour: async (fh, fetch) => {
-            const jobs: Promise<unknown>[] = fields.map((id) => FIELD_BY_ID.get(id)?.load(fetch) ?? Promise.resolve());
+            const hourKey = `${init}|${fh}`;
+            // Messages that only fed a prebuilt layer are released afterwards; those a filled layer or the
+            // mask needs stay cached, and only they count against the memory budget (through `fetch`).
+            const built = new Set<string>();
+            const kept = new Set<string>();
+            const keep = (search: string) => {
+              kept.add(search);
+              return fetch(search);
+            };
+            const jobs: Promise<unknown>[] = fields.map(async (id) => {
+              const def = FIELD_BY_ID.get(id);
+              if (!def) return;
+              if (!canPrebuild(def)) return def.load(keep);
+              const layerId = `field-${id}`;
+              if (layers.hasPrebuilt(layerId, hourKey)) return;
+              const data = await def.load((search) => {
+                built.add(search);
+                return fetchHrrrMessage(init, fh, search);
+              });
+              await layers.prebuildField({ ...def, id: layerId }, hourKey, data);
+            });
             let fits = true;
             if (entry?.forecastHours.includes(fh)) {
               const store = await openPtypeStore(storeUrl(entry));
@@ -174,12 +209,13 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
               else {
                 jobs.push(
                   readPtypeFrame(store, level, fh).then((frame) =>
-                    maskToPrecip && !frame.mask ? Promise.all(PRECIP_SEARCHES.map(fetch)) : undefined,
+                    maskToPrecip && !frame.mask ? Promise.all(PRECIP_SEARCHES.map(keep)) : undefined,
                   ),
                 );
               }
             }
             await Promise.all(jobs);
+            for (const search of built) if (!kept.has(search)) releaseHrrrMessage(init, fh, search);
             return fits;
           },
         },
