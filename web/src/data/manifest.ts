@@ -57,6 +57,40 @@ export async function fetchManifest(): Promise<Manifest> {
   return parseManifest(await resp.json());
 }
 
+/** True when two indexes list the same runs with the same hours and store paths. */
+export function manifestsEqual(a: Manifest, b: Manifest): boolean {
+  if (a.size !== b.size) return false;
+  for (const [init, x] of a) {
+    const y = b.get(init);
+    if (!y || x.store !== y.store || x.soundings !== y.soundings || x.forecastHours.length !== y.forecastHours.length) return false;
+    if (x.forecastHours.some((h, k) => h !== y.forecastHours[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * What the index says about a set of forecasts, as a string, for use as an effect dependency.
+ *
+ * With realtime runs the index changes every minute or two (a run somewhere gains an hour). Effects that
+ * depended on the index object itself would then reload the frame on screen, the sounding (dropping the
+ * user's edits) and the preload on every change, whichever run it concerned. They depend on this instead,
+ * built from only the runs and the fields they use.
+ */
+export function manifestKey(manifest: Manifest | null, frames: { init: InitIso; fhour: number }[], what: (entry: ManifestEntry, fhour: number) => string): string {
+  if (!manifest) return 'no-index';
+  return frames.map((f) => {
+    const entry = manifest.get(f.init);
+    return entry ? what(entry, f.fhour) : '-';
+  }).join(';');
+}
+
+/** For `manifestKey`: where the run's gridded store is and whether it has this forecast hour. */
+export const storeAndHour = (entry: ManifestEntry, fhour: number) => `${entry.store}:${entry.forecastHours.includes(fhour) ? 1 : 0}`;
+/** For `manifestKey`: where the run's sounding store is. */
+export const soundingsOnly = (entry: ManifestEntry) => entry.soundings;
+/** For `manifestKey`: sounding store and whether the run has this forecast hour. */
+export const soundingsAndHour = (entry: ManifestEntry, fhour: number) => `${entry.soundings}:${entry.forecastHours.includes(fhour) ? 1 : 0}`;
+
 export function storeUrl(entry: ManifestEntry): string {
   return /^https?:/.test(entry.store) ? entry.store : `${dataSources.ptypeRoot}/${entry.store}`;
 }

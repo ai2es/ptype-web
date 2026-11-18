@@ -1,4 +1,5 @@
 /** Loads the sounding for the selected point and runs the network whenever the profile changes. */
+import { manifestKey, soundingsOnly } from '../data/manifest';
 import { useEffect } from 'react';
 import { SoundingUnavailable, readSounding } from '../data/soundings';
 import { predict } from '../model/ptypeModel';
@@ -43,6 +44,7 @@ export function useSoundingLoader() {
   const init = useApp((s) => s.init);
   const fhour = useApp((s) => s.fhour);
   const manifest = useApp((s) => s.manifest);
+  const soundingKey = manifestKey(manifest, init ? [{ init, fhour: 0 }] : [], soundingsOnly);
 
   useEffect(() => {
     const { setSounding, set } = useApp.getState();
@@ -82,5 +84,6 @@ export function useSoundingLoader() {
           },
         });
       });
-  }, [point, init, fhour, manifest]);
+    // Not the index object: a run gaining an hour must not reload the sounding and drop the user's edits.
+  }, [point, init, fhour, soundingKey]);
 }

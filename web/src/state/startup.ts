@@ -3,6 +3,7 @@ import { hrrrAvailable } from '../data/hrrr';
 import { fetchManifest } from '../data/manifest';
 import { FIELD_BY_ID } from '../fields/registry';
 import { normalizeInit, shiftInit, toInitIso, type InitIso } from '../time/times';
+import { watchManifest } from './refresh';
 import { maxFhour, useApp } from './store';
 
 /** Most recent HRRR run whose first forecast hour is on the NOAA bucket. */
@@ -77,4 +78,5 @@ export async function startApp(): Promise<void> {
     timer = window.setTimeout(writeUrl, 250);
   });
   writeUrl();
+  watchManifest();
 }

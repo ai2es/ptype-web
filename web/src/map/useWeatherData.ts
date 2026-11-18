@@ -1,7 +1,7 @@
 /** Loads the data for the selected time and hands it to the map layers. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity, releaseHrrrExcept, releaseHrrrMessage } from '../data/hrrr';
-import { storeUrl } from '../data/manifest';
+import { manifestKey, storeAndHour, storeUrl } from '../data/manifest';
 import { prefetchOrder, startPrefetch, stopPrefetch } from '../data/prefetch';
 import { chooseLevel, frameCacheRoom, hasPtypeFrame, openPtypeStore, readPtypeFrame, releasePtypeExcept } from '../data/ptype';
 import { keepOldRuns, memoryDebug } from '../debug/memory';
@@ -32,8 +32,13 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
   // changes with the run or the valid time, not with every step.
   const loopKey = !init ? null : mode === 'trend' ? `trend|${validIso(init, fhour)}` : `run|${init}`;
   const loop = useMemo(() => loopFrames({ mode, init, fhour }), [loopKey]);
+  const loopIndexKey = manifestKey(useApp((st) => st.manifest), loop, storeAndHour);
   const activeFields = useApp((s) => s.activeFields);
   const manifest = useApp((s) => s.manifest);
+  // The index is re-read every couple of minutes and changes whenever any realtime run gains an hour. The
+  // effects below depend on what it says about the forecasts they use, not on the index object, so a change to
+  // some other run does not reload the frame on screen or restart the preload (see `manifestKey`).
+  const frameIndexKey = manifestKey(manifest, init ? [{ init, fhour }] : [], storeAndHour);
   const showPtype = useApp((s) => s.showPtype);
   const showUncertainty = useApp((s) => s.showUncertainty);
   const showBourgouin = useApp((s) => s.showBourgouin);
@@ -61,7 +66,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
     releaseMasksExcept(keep);
     layers?.keepOnlyPrebuilt(keep);
     // `loop` and `mode` change only together with `loopKey`.
-  }, [layers, loopKey, manifest]);
+  }, [layers, loopKey, loopIndexKey]);
 
   // HRRR fields ------------------------------------------------------------
   const fieldGen = useRef(0);
@@ -197,7 +202,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       console.error(err);
       clear('error');
     });
-  }, [layers, init, fhour, manifest, showPtype, showBourgouin, showUncertainty, maskToPrecip, ptypeOpacity, zoomBucket, latBucket, setLayerStatus]);
+  }, [layers, init, fhour, frameIndexKey, showPtype, showBourgouin, showUncertainty, maskToPrecip, ptypeOpacity, zoomBucket, latBucket, setLayerStatus]);
 
   // The rest of the loop, in the background ------------------------------------
   // Deliberately keyed on the loop, not on the frame: stepping through it must not restart the loading.
@@ -290,5 +295,5 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       window.clearTimeout(timer);
       stopPrefetch();
     };
-  }, [layers, loopKey, fieldKey, manifest, preloadRun, maskToPrecip, showBourgouin, zoomBucket, latBucket, restart]);
+  }, [layers, loopKey, fieldKey, loopIndexKey, preloadRun, maskToPrecip, showBourgouin, zoomBucket, latBucket, restart]);
 }
