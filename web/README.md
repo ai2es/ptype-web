@@ -56,10 +56,13 @@ link in trend mode.
 Any HRRR run counts. A run without a generated precipitation-type forecast shows its HRRR fields only, as in
 run mode; a run whose file is not on NOAA's bucket is hatched on the slider and passed over by the animation.
 
-With a point selected, trend mode adds a chart to the sounding panel: the four class probabilities and the
-uncertainty at that point from every run of the loop (`src/sounding/TrendChart.tsx`). Each value is the run's
-stored sounding put through the network, the same as the probability bars, so the two agree. Clicking the
-chart shows that run. For 24 runs it took 169 small requests and 4.8 s to fill on a desktop connection.
+With a point selected, the sounding panel charts the four class probabilities and the uncertainty at that
+point along the loop (`src/sounding/PointSeries.tsx`): against forecast hour for the run in run mode, and
+from every run of the loop in trend mode. Each value is the stored sounding put through the network, the same
+as the probability bars, so the two agree. Clicking the chart shows that hour or run. Measured on a desktop
+connection while the map was preloading: 24 runs of a trend loop took 169 small requests and 4.8 s, the 49
+hours of a 48-hour run 152 requests and 12 s, the 19 hours of an 18-hour run 62 requests and 4.8 s; the
+frames nearest the one on screen are read first.
 Snow blue and sleet purple are hard to tell apart as thin lines (the site's type colours are shared with the
 map), so each series also has its own marker shape and the values are available as a table.
 

@@ -276,7 +276,10 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
             return fits;
           },
         },
-        (progress) => useApp.getState().set({ prefetch: progress }),
+        // The loader skips the frame that was on screen when it started, because the effects above load that
+        // one. Count it as in memory all the same; otherwise it drops out of the time bar's loaded marks as
+        // soon as the user steps away from it.
+        (progress) => useApp.getState().set({ prefetch: { ...progress, ready: [...progress.ready, now.fhour] } }),
       );
     }, 600);
     return () => {

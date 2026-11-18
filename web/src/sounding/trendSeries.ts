@@ -1,9 +1,10 @@
 /**
- * The network's output at one point from every run of a trend loop, for the chart in the sounding panel.
+ * The network's output at one point from every frame of a loop (the hours of a run, or the runs of a
+ * trend loop), for the chart in the sounding panel.
  *
  * Each value comes from the run's stored sounding at that point put through the network, exactly as the
  * panel's probability bars do, so the chart and the bars agree. That costs one small range request per
- * run and does not depend on which map frames happen to be loaded.
+ * frame and does not depend on which map frames happen to be loaded.
  */
 import type { Manifest } from '../data/manifest';
 import { SoundingUnavailable, readSounding } from '../data/soundings';
