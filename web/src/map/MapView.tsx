@@ -6,6 +6,7 @@ import { PTYPE_STYLES } from '../config/ptypeStyle';
 import { useApp, type BoundaryId } from '../state/store';
 import { sampleHover, type HoverValue } from './hoverData';
 import { BOUNDARY_LAYERS, buildStyle } from './style';
+import { setBasemap } from './terrain';
 import { useWeatherData } from './useWeatherData';
 import { WeatherLayers } from './WeatherLayers';
 
@@ -25,6 +26,7 @@ export function MapView() {
 
   const boundaries = useApp((s) => s.boundaries);
   const point = useApp((s) => s.point);
+  const basemap = useApp((s) => s.basemap);
 
   useEffect(() => {
     if (!container.current) return;
@@ -83,6 +85,14 @@ export function MapView() {
       }
     }
   }, [boundaries, layers]);
+
+  // Terrain shading and contours. A failure (the elevation tiles or the contour code not loading) leaves the
+  // plain basemap in place, so it is reported and otherwise ignored.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !layers) return;
+    setBasemap(maplibregl, map, basemap).catch((err) => console.error('terrain basemap:', err));
+  }, [basemap, layers]);
 
   // Marker at the selected sounding point.
   useEffect(() => {

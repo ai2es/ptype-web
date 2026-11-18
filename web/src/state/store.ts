@@ -45,6 +45,8 @@ export interface AppState {
   maskToPrecip: boolean;
   showUncertainty: boolean;
   boundaries: Record<BoundaryId, boolean>;
+  /** 'terrain' adds hill shading and elevation contours to the plain basemap (map/terrain.ts). */
+  basemap: 'plain' | 'terrain';
   /** Load state per map layer id, for the layer menu. */
   layerStatus: Record<string, LayerStatus>;
   /** Load the selected layers for every hour of the run in the background. */
@@ -120,6 +122,7 @@ export const useApp = create<AppState>((set, get) => ({
   maskToPrecip: true,
   showUncertainty: false,
   boundaries: { states: true, counties: false, cwas: false, highways: true, cities: true },
+  basemap: 'plain',
   layerStatus: {},
   // Off by default on phones and tablets: a whole run can exceed what their browsers allow one tab.
   preloadRun: !isLowMemoryDevice(),

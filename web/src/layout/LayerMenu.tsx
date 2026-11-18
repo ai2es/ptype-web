@@ -107,6 +107,18 @@ export function LayerMenu() {
           </label>
         ))}
       </section>
+
+      <section>
+        <h3>Basemap</h3>
+        <label className="check">
+          <input type="radio" name="basemap" checked={s.basemap === 'plain'} onChange={() => s.set({ basemap: 'plain' })} />
+          <span>Plain</span>
+        </label>
+        <label className="check">
+          <input type="radio" name="basemap" checked={s.basemap === 'terrain'} onChange={() => s.set({ basemap: 'terrain' })} />
+          <span>Terrain (shading and elevation contours)</span>
+        </label>
+      </section>
     </aside>
   );
 }

@@ -112,6 +112,22 @@ way for one preloaded 48-hour run with those three layers:
 | Masks | 22 MB | 22 MB | |
 | Total | 1,315 MB | 673 MB | |
 
+### Terrain basemap
+
+The layer menu's **Basemap** choice (or `?basemap=terrain` in the address) adds hill shading and elevation
+contours to the plain basemap (`src/map/terrain.ts`).
+
+- **Data.** Both come from one set of elevation tiles, the Mapzen terrain tiles published as AWS open data
+  (`elevation-tiles-prod`, no key). Contours are traced in the browser by `maplibre-contour`, in a web worker,
+  from the same cached tiles the shading uses.
+- **Cost when off.** Nothing: the contour code is a separate 29 kB file that is fetched, with the tiles, only
+  when the terrain basemap is first chosen (checked: no elevation or contour request on a plain page load).
+- **Layer order.** Shading sits under the water and under every weather fill, so it never tints a colour that
+  has a legend. Contours sit above the fills and below the boundaries, so terrain stays readable under an
+  opaque field such as temperature.
+- **Contours** are in feet, spaced from 5,000 ft at the continental view to 200 ft at zoom 9 and above
+  (`CONTOUR_THRESHOLDS`); every fifth or so is heavier and, from zoom 6, labelled.
+
 ### Wind barbs
 
 autumnplot-gl draws a barb at every grid point it is given on every frame and hides the ones the zoom does not

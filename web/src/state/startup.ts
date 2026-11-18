@@ -30,6 +30,7 @@ function readUrl() {
   if (q.has('lat') && q.has('lon') && Number.isFinite(lat) && Number.isFinite(lon)) patch.point = { lat, lon };
   if (q.has('fields')) patch.activeFields = q.get('fields')!.split(',').filter((id) => FIELD_BY_ID.has(id));
   if (q.get('mode') === 'trend') patch.mode = 'trend';
+  if (q.get('basemap') === 'terrain') patch.basemap = 'terrain';
   const fh = Number(q.get('fh'));
   return { init, fhour: q.has('fh') && Number.isInteger(fh) && fh >= 0 ? fh : null, patch };
 }
@@ -41,6 +42,7 @@ function writeUrl() {
   q.set('init', s.init);
   q.set('fh', String(s.fhour));
   if (s.mode === 'trend') q.set('mode', 'trend');
+  if (s.basemap === 'terrain') q.set('basemap', 'terrain');
   if (s.point) {
     q.set('lat', s.point.lat.toFixed(3));
     q.set('lon', s.point.lon.toFixed(3));
