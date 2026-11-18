@@ -66,6 +66,18 @@ frames nearest the one on screen are read first.
 Snow blue and sleet purple are hard to tell apart as thin lines (the site's type colours are shared with the
 map), so each series also has its own marker shape and the values are available as a table.
 
+## Realtime runs
+
+The run index (`inits.json`) is re-read every two minutes while the tab is visible, and once when it becomes
+visible again (`src/state/refresh.ts`). Realtime runs gain forecast hours as the HRRR publishes them, new runs
+appear, and a finished run's store moves from its staging path to its final one; all of that shows up without
+a reload. An unchanged index is not adopted and a failed read is ignored.
+
+The index now changes every minute or two, so nothing depends on the index object itself. Each view depends
+on what the index says about the forecasts it uses (`manifestKey` in `src/data/manifest.ts`): the frame on
+screen reloads when its own hour arrives or its store moves, the preload restarts when its loop changes, and
+the sounding reloads only if its sounding store changes, so edits to a sounding survive a run gaining hours.
+
 ## Background loading
 
 With "Preload run" ticked in the time bar (the default), the layers that are switched on are loaded for every

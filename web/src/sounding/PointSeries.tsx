@@ -3,6 +3,7 @@
  * every forecast hour of the run (run mode), or every run valid at the time on screen, oldest first
  * (trend mode). Four class probabilities and the uncertainty.
  */
+import { manifestKey, soundingsAndHour } from '../data/manifest';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PTYPE_STYLES, UNCERTAINTY_COLOR } from '../config/ptypeStyle';
 import { frameIndex, loopFrames, useApp } from '../state/store';
@@ -37,6 +38,8 @@ function marker(shape: (typeof SERIES)[number]['shape'], x: number, y: number, r
 /** The point's forecast from every frame of the loop, filled in as the soundings arrive. */
 function useTrendSeries(frames: Frame[], key: string | null) {
   const manifest = useApp((s) => s.manifest);
+  // Reload when the index changes for these frames (a realtime run gained an hour), not for any other run.
+  const indexKey = manifestKey(manifest, frames, soundingsAndHour);
   const [values, setValues] = useState<{ key: string | null; byLead: Map<number, TrendValue> }>({ key: null, byLead: new Map() });
   const framesRef = useRef(frames);
   framesRef.current = frames;
@@ -56,7 +59,7 @@ function useTrendSeries(frames: Frame[], key: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [key, manifest]);
+  }, [key, indexKey]);
   return values.key === key ? values.byLead : new Map<number, TrendValue>();
 }
 
