@@ -132,7 +132,10 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .range input { flex: 1; accent-color: var(--ncar-blue); }
 
 /* Legend */
-.legend { position: absolute; left: 10px; bottom: 28px; display: flex; gap: 12px; align-items: flex-end; pointer-events: none; }
+/* Stops short of the zoom buttons at the bottom right, and stacks its blocks when they do not fit side by side (phones). */
+.legend { position: absolute; left: 10px; right: 54px; bottom: 28px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: flex-end; pointer-events: none; }
+.colorbar { max-width: 100%; }
+.colorbar svg { display: block; max-width: 100%; height: auto; }
 .legend-block, .colorbar { background: rgba(255, 255, 255, 0.95); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; font-size: 11px; }
 .legend-title { font-weight: 600; margin-bottom: 3px; }
 .legend-row { display: flex; align-items: center; gap: 6px; }

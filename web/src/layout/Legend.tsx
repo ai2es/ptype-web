@@ -27,7 +27,9 @@ function ColorBar({ fieldId }: { fieldId: string }) {
 export function Legend() {
   const showPtype = useApp((s) => s.showPtype);
   const showBourgouin = useApp((s) => s.showBourgouin);
-  const showTypes = showPtype || showBourgouin;
+  // No type legend on a frame that has no precipitation-type forecast (a run that was not generated).
+  const noForecast = useApp((s) => s.layerStatus.ptype === 'unavailable');
+  const showTypes = (showPtype || showBourgouin) && !noForecast;
   const activeFields = useApp((s) => s.activeFields);
   const firstBin = Math.round(LEGEND_MIN_PROB * 10);
   const bars = activeFields.filter((id) => {
