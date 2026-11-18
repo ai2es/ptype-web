@@ -12,7 +12,7 @@ import type { Map as MapLibreMap } from 'maplibre-gl';
 import { UNCERTAINTY_COLOR } from '../config/ptypeStyle';
 import type { HrrrGridInfo } from '../data/hrrr';
 import { uncertainty, type PtypeFrame } from '../data/ptype';
-import { smooth, splitContourLevels } from '../fields/gridops';
+import { smooth, splitContourLevels, thin } from '../fields/gridops';
 import type { FieldData, FieldDef } from '../fields/registry';
 import { Lambert, type GridDef } from '../geo/lambert';
 import { isLowMemoryDevice } from '../config/device';
@@ -65,7 +65,8 @@ async function until(ready: () => boolean, timeoutMs = 20000): Promise<void> {
 function disposeGl(comp: unknown, gl: WebGLRenderingContext): void {
   const c = comp as Record<string, unknown> & { gl_elems?: { barb_billboards?: Record<string, unknown> & { gl_elems?: Record<string, unknown> } } | null };
   const billboards = c.gl_elems?.barb_billboards;
-  const roots = [c.contours, c.text_collection, c.fill_texture, c.mask_texture, billboards?.wind_textures, billboards?.gl_elems?.texture, billboards?.gl_elems?.geom_vertices];
+  // Not the barbs' glyph texture: one copy is shared by every hour (see `shareBarbResources`).
+  const roots = [c.contours, c.text_collection, c.fill_texture, c.mask_texture, billboards?.wind_textures, billboards?.gl_elems?.geom_vertices];
   const maxAttribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
   const seen = new Set<unknown>();
   const stack = roots.map((value) => ({ value, depth: 0 }));
@@ -101,8 +102,16 @@ class KeyedLayer {
   private map: MapLibreMap | null = null;
   private gl: WebGLRenderingContext | null = null;
 
-  /** `minZoom`: draw only from this map zoom inwards (used for the in-between contour lines). */
-  constructor(readonly id: string, private readonly minZoom = 0) {}
+  /**
+   * `minZoom`, `maxZoom`: draw only while the map zoom is in [minZoom, maxZoom). Used for the in-between
+   * contour lines, which appear once zoomed in, and for the two densities of wind barbs.
+   */
+  constructor(readonly id: string, private readonly minZoom = 0, private readonly maxZoom = Infinity) {}
+
+  /** The graphics context, once the layer is on the map. */
+  get context(): WebGLRenderingContext | null {
+    return this.gl;
+  }
 
   onAdd(map: MapLibreMap, gl: WebGLRenderingContext) {
     this.map = map;
@@ -110,7 +119,7 @@ class KeyedLayer {
   }
 
   render(gl: WebGLRenderingContext, arg: unknown) {
-    if (this.map && this.map.getZoom() < this.minZoom) return;
+    if (this.map && (this.map.getZoom() < this.minZoom || this.map.getZoom() >= this.maxZoom)) return;
     const comp = this.active === null ? undefined : this.comps.get(this.active);
     (comp as { render(gl: WebGLRenderingContext, arg: unknown): void } | undefined)?.render(gl, arg);
   }
@@ -153,6 +162,19 @@ interface Prebuilt {
 }
 
 /** Uncertainty is smoothed over about this distance (box blur radius), whatever the pyramid level. */
+/**
+ * Wind barbs are drawn from two thinned copies of the wind grid, by zoom. autumnplot-gl draws a barb at
+ * every grid point it is given on every frame and hides the ones the zoom does not call for in the shader,
+ * so the full 1799 x 1059 grid cost 16 ms a frame at any zoom (measured), for a few hundred visible barbs.
+ * The barbs are 2^(9 - zoom) cells apart (32 cells at zoom 4), so below zoom 7 every 8th point (30,000
+ * barbs) loses nothing. From zoom 7 every 2nd point is kept (477,000): the same barbs as the full grid
+ * gives below zoom 9, and from zoom 9 barbs 6 km apart, where the full grid gave 3 km.
+ */
+const BARB_TIERS = [
+  { name: 'coarse', step: 8, minZoom: 0, maxZoom: 7 },
+  { name: 'fine', step: 2, minZoom: 7, maxZoom: Infinity },
+];
+
 const UNCERTAINTY_SMOOTH_M = 9000;
 
 /** Contours every 0.02, of which only every 0.1 is drawn until the map is zoomed in to a region. */
@@ -189,6 +211,8 @@ export class WeatherLayers {
   private readonly grids = new Map<string, AnyGrid>();
   private readonly prebuilt = new Map<string, Prebuilt>();
   private keep: KeepFrame[] | null = null;
+  /** The barb glyph texture and shader program, made by the first barb layer and used by all the others. */
+  private barbShared: { texture: unknown; shader_manager: unknown } | null = null;
 
   constructor(private readonly map: MapLibreMap) {
     registerMemoryStats('prebuiltBreakdown', () => this.breakdown());
@@ -210,7 +234,8 @@ export class WeatherLayers {
         if (v === null || typeof v !== 'object' || seen.has(v) || ArrayBuffer.isView(v) || v instanceof Node) continue;
         seen.add(v);
         if (v.buffer instanceof WebGLBuffer && typeof v.n_verts === 'number') total += (v.n_verts as number) * (v.n_coords_per_vert as number) * 4;
-        else if (seen.size < 5000) stack.push(...(Array.isArray(v) ? v : Object.values(v)));
+        // Pushed one at a time: spreading a long array into push() overflows the call stack.
+        else if (seen.size < 5000) for (const child of Array.isArray(v) ? v : Object.values(v)) stack.push(child);
       }
       return Math.round(total / 1024);
     };
@@ -289,8 +314,10 @@ export class WeatherLayers {
     let p = this.prebuilt.get(def.id);
     if (!p) {
       const st = def.style;
-      const names = st.type === 'barbs' ? ['barbs'] : st.type !== 'contour' ? ['fill'] : st.labels ? ['lines', 'labels'] : ['lines'];
+      const names = st.type === 'barbs' ? [] : st.type !== 'contour' ? ['fill'] : st.labels ? ['lines', 'labels'] : ['lines'];
       const layers = names.map((n) => new KeyedLayer(`${def.id}-${n}`));
+      // Barbs: one layer per density, each drawn over its own range of zoom.
+      if (st.type === 'barbs') layers.push(...BARB_TIERS.map((t) => new KeyedLayer(`${def.id}-barbs-${t.name}`, t.minZoom, t.maxZoom)));
       // A second set of layers holds the in-between lines, which only draw once the map is zoomed in.
       if (st.type === 'contour' && st.coarseInterval) layers.push(...names.map((n) => new KeyedLayer(`${def.id}-fine-${n}`, st.fineMinZoom ?? 0)));
       p = { layers, keys: new Set(), pending: new Map() };
@@ -311,9 +338,14 @@ export class WeatherLayers {
     const style = def.style;
     if (style.type === 'barbs') {
       if (data.kind !== 'vector') throw new Error(`${def.id}: expected a vector field`);
-      // The registry has already thinned the winds, so the barbs hold only a small copy.
-      const barbs = new Barbs(new RawVectorField(grid, toFloat16(data.u), toFloat16(data.v), { relative_to: 'grid' }), { color: style.color, thin_fac: style.thinFac, line_width: 1.5 });
-      await entry.layers[0].add(key, barbs as Comp);
+      for (const [k, tier] of BARB_TIERS.entries()) {
+        const u = thin(data.u, data.grid, tier.step);
+        const v = thin(data.v, data.grid, tier.step);
+        // `thinFac` is in cells of the full grid, so the spacing on screen is the same as without thinning.
+        const barbs = new Barbs(new RawVectorField(this.barbGrid(u.grid), toFloat16(u.data), toFloat16(v.data), { relative_to: 'grid' }), { color: style.color, thin_fac: style.thinFac / tier.step, line_width: 1.5 });
+        await entry.layers[k].add(key, barbs as Comp);
+        this.shareBarbResources(barbs, entry.layers[k].context);
+      }
     } else if (style.type === 'contour') {
       if (data.kind !== 'scalar') throw new Error(`${def.id}: expected a scalar field`);
       const field = new RawScalarField(grid, data.values);
@@ -497,11 +529,58 @@ export class WeatherLayers {
     };
   }
 
+  /**
+   * The grid for a set of barbs. autumnplot-gl asks the grid for a "thinned" copy every time a barb
+   * layer is built and hangs the barb positions and the wind-rotation texture on that copy, so each
+   * forecast hour used to compute and upload its own (measured: 2.1 s and 29 MB of graphics memory per
+   * hour on the full grid). Handing back the same copy each time makes every hour share one set.
+   */
+  private barbGrid(g: HrrrGridInfo): AnyGrid {
+    const grid = this.hrrrGrid(g) as AnyGrid & { getThinnedGrid(thinFac: number, maxZoom: number): AnyGrid; barbCopies?: Map<string, AnyGrid> };
+    if (!grid.barbCopies) {
+      const copies = new Map<string, AnyGrid>();
+      const make = grid.getThinnedGrid.bind(grid);
+      grid.barbCopies = copies;
+      grid.getThinnedGrid = (thinFac, maxZoom) => {
+        const key = `${thinFac}|${maxZoom}`;
+        if (!copies.has(key)) copies.set(key, make(thinFac, maxZoom));
+        return copies.get(key)!;
+      };
+    }
+    return grid;
+  }
+
+  /**
+   * Every barb layer draws the same sheet of barb shapes with the same shader, but autumnplot-gl gives
+   * each one its own 1024 x 1024 canvas, a 4 MB texture made from it, and a shader program compiled the
+   * first time it is drawn. Keep the first layer's and point the others at them.
+   */
+  private shareBarbResources(barbs: unknown, gl: WebGLRenderingContext | null): void {
+    const b = barbs as { barb_texture: unknown; gl_elems: { barb_billboards: { billboard_image: unknown; gl_elems: { texture: { texture?: WebGLTexture }; shader_manager: unknown } | null } } | null };
+    const own = b.gl_elems?.barb_billboards.gl_elems;
+    if (!own) return;
+    if (!this.barbShared) this.barbShared = { texture: own.texture, shader_manager: own.shader_manager };
+    else {
+      if (gl && own.texture.texture) gl.deleteTexture(own.texture.texture);
+      own.texture = this.barbShared.texture as typeof own.texture;
+      own.shader_manager = this.barbShared.shader_manager;
+    }
+    // The canvas was only needed for the upload.
+    b.barb_texture = null;
+    b.gl_elems!.barb_billboards.billboard_image = null;
+  }
+
   private hrrrGrid(g: HrrrGridInfo): AnyGrid {
     const key = gridKey(g);
     let grid = this.grids.get(key);
     if (!grid) {
-      grid = LambertGrid.fromLLCornerLonLat(g.ni, g.nj, g.lon0, g.lat0, g.latStd, g.llLon, g.llLat, g.dx, g.dy, HRRR_RADIUS, HRRR_RADIUS);
+      // autumnplot-gl takes the far corner to be ni * dx from the first point and then spreads the ni points
+      // over that span, which stretches the grid by one cell: 3 km at the north-east corner of the full grid,
+      // but 24 km on the every-8th-point grid the barbs use. Scale the spacing so the last point lands where
+      // it should, (ni - 1) * dx from the first.
+      const dx = (g.dx * (g.ni - 1)) / g.ni;
+      const dy = (g.dy * (g.nj - 1)) / g.nj;
+      grid = LambertGrid.fromLLCornerLonLat(g.ni, g.nj, g.lon0, g.lat0, g.latStd, g.llLon, g.llLat, dx, dy, HRRR_RADIUS, HRRR_RADIUS);
       this.grids.set(key, grid);
     }
     return grid;

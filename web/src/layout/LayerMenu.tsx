@@ -1,3 +1,4 @@
+import { BOURGOUIN_URL } from './AboutDialog';
 import { useState } from 'react';
 import { FIELDS } from '../fields/registry';
 import { useApp, type BoundaryId, type LayerStatus } from '../state/store';
@@ -78,7 +79,7 @@ export function LayerMenu() {
           <Status status={s.layerStatus.bourgouin} />
         </label>
         <p className="layer-note">
-          Layer-energy diagnosis (Birk et al. 2021) from the same HRRR profiles, for comparison. Shown in place of the
+          Layer-energy diagnosis (<a href={BOURGOUIN_URL} target="_blank" rel="noreferrer">Birk et al. 2021</a>) from the same HRRR profiles, for comparison. Shown in place of the
           network&apos;s; the mask and opacity above apply to both.
         </p>
       </section>

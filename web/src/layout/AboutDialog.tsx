@@ -3,6 +3,9 @@ import { useApp } from '../state/store';
 export const PAPER_URL = 'https://doi.org/10.1175/WAF-D-25-0237.1';
 
 const EVIDENTIAL_URL = 'https://doi.org/10.1175/AIES-D-23-0093.1';
+/** The revised Bourgouin layer-energy method shown as the comparison layer. */
+export const BOURGOUIN_URL = 'https://doi.org/10.1175/WAF-D-20-0118.1';
+const AUTUMNPLOT_URL = 'https://github.com/tsupinie/autumnplot-gl';
 
 export function AboutDialog() {
   const open = useApp((s) => s.aboutOpen);
@@ -35,6 +38,11 @@ export function AboutDialog() {
           <i>Artificial Intelligence for the Earth Systems</i>, <b>3</b> (4),{' '}
           <a href={EVIDENTIAL_URL} target="_blank" rel="noreferrer">{EVIDENTIAL_URL}</a>.
         </p>
+        <p className="citation">
+          The revised Bourgouin method (the comparison layer): Birk, K., E. Lenning, K. Donofrio, and M. T. Friedlein,
+          2021: A revised Bourgouin precipitation-type algorithm. <i>Weather and Forecasting</i>, <b>36</b>, 425–438,{' '}
+          <a href={BOURGOUIN_URL} target="_blank" rel="noreferrer">{BOURGOUIN_URL}</a>.
+        </p>
         <h2>Code</h2>
         <ul className="link-list">
           <li>
@@ -46,6 +54,13 @@ export function AboutDialog() {
             processing, training and evaluation for the precipitation-type model
           </li>
         </ul>
+        <h2>Credits</h2>
+        <p>
+          Map rendered with <a href={AUTUMNPLOT_URL} target="_blank" rel="noreferrer">autumnplot-gl</a> by Tim Supinie.
+        </p>
+        <p>
+          Orchestrated by David John Gagne based on an original viewer by Jacob Radford. Built with Claude Code.
+        </p>
         <button type="button" className="btn btn-primary" onClick={close}>Close</button>
       </div>
     </div>
