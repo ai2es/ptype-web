@@ -3,6 +3,7 @@
  * creates the plot components the first time and afterwards only swaps the
  * field data, which is what keeps time stepping fast.
  */
+import { isKept, type KeepFrame } from '../time/trend';
 import {
   Barbs, Contour, ContourFill, ContourLabels, LambertGrid, PlotLayer, Raster, RawScalarField, RawVectorField,
   type PlotComponent,
@@ -187,7 +188,7 @@ export class WeatherLayers {
   private readonly slots = new Map<string, Slot>();
   private readonly grids = new Map<string, AnyGrid>();
   private readonly prebuilt = new Map<string, Prebuilt>();
-  private keepPrefix: string | null = null;
+  private keep: KeepFrame[] | null = null;
 
   constructor(private readonly map: MapLibreMap) {
     registerMemoryStats('prebuiltBreakdown', () => this.breakdown());
@@ -366,7 +367,7 @@ export class WeatherLayers {
       for (const layer of entry.layers) layer.drop(oldest);
     }
     // A build can finish after the user has moved to another run; do not let it bring the old run back.
-    if (this.keepPrefix !== null && !key.startsWith(this.keepPrefix)) this.dropPrebuilt(entry, key);
+    if (!this.keeps(key)) this.dropPrebuilt(entry, key);
   }
 
   private dropPrebuilt(entry: Prebuilt, key: string): void {
@@ -374,15 +375,21 @@ export class WeatherLayers {
     for (const layer of entry.layers) layer.drop(key);
   }
 
+  /** Prebuilt keys start with `init|fhour`. */
+  private keeps(key: string): boolean {
+    if (this.keep === null) return true;
+    const [init, fhour] = key.split('|');
+    return isKept(this.keep, init, Number(fhour));
+  }
+
   /**
-   * Keep only the prebuilt hours whose key starts with `prefix` (the selected run) and free the rest,
-   * including any that are still being built. Pass null to stop filtering.
+   * Keep only the prebuilt hours that `keep` covers (the selected run, or the runs of a trend loop)
+   * and free the rest, including any that are still being built. Pass null to stop filtering.
    */
-  keepOnlyPrebuilt(prefix: string | null): void {
-    this.keepPrefix = prefix;
-    if (prefix === null) return;
+  keepOnlyPrebuilt(keep: KeepFrame[] | null): void {
+    this.keep = keep;
     for (const entry of this.prebuilt.values()) {
-      for (const key of [...entry.keys]) if (!key.startsWith(prefix)) this.dropPrebuilt(entry, key);
+      for (const key of [...entry.keys]) if (!this.keeps(key)) this.dropPrebuilt(entry, key);
     }
   }
 

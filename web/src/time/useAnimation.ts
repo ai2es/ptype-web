@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { useApp } from '../state/store';
+import { frameIndex, loopFrames, useApp } from '../state/store';
 
-/** Advances the forecast hour while playing, waiting for the current frame to finish loading. */
+/** Advances the loop while playing, waiting for the current frame to finish loading. */
 export function useAnimation() {
   const playing = useApp((s) => s.playing);
   const frameMs = useApp((s) => s.frameMs);
@@ -18,7 +18,13 @@ export function useAnimation() {
       if (busy && performance.now() - started < 15000) {
         timer = window.setTimeout(tick, 80);
       } else {
-        s.stepFhour(1);
+        // A trend loop can include runs that are not on NOAA's bucket; pass over the ones known to be missing.
+        const frames = loopFrames(s);
+        const missing = new Set(s.mode === 'trend' ? s.prefetch?.failed ?? [] : []);
+        const at = frameIndex(frames, s);
+        let step = 1;
+        while (step < frames.length && missing.has(frames[(at + step) % frames.length].fhour)) step++;
+        s.stepFhour(step);
       }
     };
     timer = window.setTimeout(tick, frameMs);

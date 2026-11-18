@@ -44,7 +44,19 @@ describe('releaseMasksExcept', () => {
     await reflectivityMask('2023-12-26T00:00Z', 2, level, fetch);
     await reflectivityMask('2023-12-26T06:00Z', 1, level, fetch);
     expect(maskCacheStats()).toMatchObject({ masks: 3, runs: 2 });
-    releaseMasksExcept('2023-12-26T06:00Z');
+    releaseMasksExcept([{ init: '2023-12-26T06:00Z' }]);
     expect(maskCacheStats()).toMatchObject({ masks: 1, runs: 1 });
+  });
+
+  it('keeps single forecast hours of several runs (a trend loop)', async () => {
+    const { level, refc } = setup(3, 2, 1, [-10, 0, 0.5, 35, NaN, -0.1]);
+    const fetch = () => Promise.resolve(refc);
+    releaseMasksExcept([]);
+    await reflectivityMask('2023-12-26T00:00Z', 6, level, fetch);
+    await reflectivityMask('2023-12-26T00:00Z', 7, level, fetch);
+    await reflectivityMask('2023-12-26T05:00Z', 1, level, fetch);
+    await reflectivityMask('2023-12-26T05:00Z', 2, level, fetch);
+    releaseMasksExcept([{ init: '2023-12-26T00:00Z', fhour: 6 }, { init: '2023-12-26T05:00Z', fhour: 1 }]);
+    expect(maskCacheStats()).toMatchObject({ masks: 2, runs: 2 });
   });
 });

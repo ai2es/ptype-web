@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
-import { FRAME_SPEEDS, maxFhour, useApp } from '../state/store';
+import { FRAME_SPEEDS, loopFrames, useApp } from '../state/store';
 
 export const SHORTCUTS: { keys: string; action: string }[] = [
-  { keys: '← / →  or  , / .', action: 'Previous / next forecast hour' },
+  { keys: '← / →  or  , / .', action: 'Previous / next forecast hour (model trend: older / newer run)' },
   { keys: 'Space', action: 'Play or pause the animation' },
-  { keys: 'Home / End', action: 'First / last forecast hour' },
-  { keys: 'Shift + ← / →', action: 'Previous / next model run (1 hour)' },
+  { keys: 'Home / End', action: 'First / last forecast hour (model trend: longest lead / analysis)' },
+  { keys: 'Shift + ← / →', action: 'Previous / next model run (model trend: valid time one hour earlier / later)' },
   { keys: '[ / ]', action: 'Slower / faster animation' },
   { keys: 'Esc', action: 'Stop animation, close dialogs' },
   { keys: '?', action: 'Show this help' },
@@ -39,8 +39,8 @@ export function useKeyboardShortcuts() {
         case ',': case '<': s.setPlaying(false); s.stepFhour(-1); break;
         case '.': case '>': s.setPlaying(false); s.stepFhour(1); break;
         case ' ': s.setPlaying(!s.playing); break;
-        case 'Home': s.setPlaying(false); s.setFhour(0); break;
-        case 'End': s.setPlaying(false); s.setFhour(maxFhour(s.init)); break;
+        case 'Home': s.setPlaying(false); s.setFrame(0); break;
+        case 'End': s.setPlaying(false); s.setFrame(loopFrames(s).length - 1); break;
         case '[': speed(-1); break;
         case ']': speed(1); break;
         case '?': s.set({ helpOpen: !s.helpOpen }); break;

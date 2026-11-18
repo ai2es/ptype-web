@@ -230,16 +230,18 @@ export function chooseLevel(store: PtypeStore, zoom: number, lat: number, pixels
 }
 
 /**
- * Forget every frame and open store except those of `keepUrl` (the selected run's store), so
- * the previous run's frames (2 to 40 MB each) can be garbage collected as soon as the run changes.
+ * Forget every frame and open store that `keep` does not cover (an entry without a forecast hour
+ * covers the whole store), so the frames of the previous run or trend loop (2 to 40 MB each) can be
+ * garbage collected as soon as the selection changes.
  */
-export function releasePtypeExcept(keepUrl: string | null): void {
+export function releasePtypeExcept(keep: { url: string; fhour?: number }[]): void {
   for (const key of [...frames.keys()]) {
-    if (keepUrl !== null && key.startsWith(`${keepUrl}|`)) continue;
+    const [url, , fhour] = key.split('|');
+    if (keep.some((k) => k.url === url && (k.fhour === undefined || k.fhour === Number(fhour)))) continue;
     frames.delete(key);
     frameSizes.delete(key);
   }
-  for (const url of [...stores.keys()]) if (url !== keepUrl) stores.delete(url);
+  for (const url of [...stores.keys()]) if (!keep.some((k) => k.url === url)) stores.delete(url);
 }
 
 /** What the caches hold: for the memory probe (`?memdebug`). */

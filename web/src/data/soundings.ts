@@ -59,10 +59,10 @@ async function open(url: string): Promise<SoundingStore> {
   };
 }
 
-// Opening a store costs a few small requests; keep the last few runs so stepping
-// through forecast hours, or flipping between two runs, does not repeat them.
+// Opening a store costs a few small requests; keep the last runs so stepping through forecast hours,
+// or round a model trend loop (up to 24 runs), does not repeat them. An open store is only its metadata.
 const stores = new Map<string, Promise<SoundingStore>>();
-const MAX_STORES = 4;
+const MAX_STORES = 32;
 
 function store(url: string): Promise<SoundingStore> {
   let p = stores.get(url);

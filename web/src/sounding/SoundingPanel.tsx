@@ -7,6 +7,7 @@ import { ProbabilityBars } from './ProbabilityBars';
 import { profilesEqual } from './profile';
 import { SkewT } from './SkewT';
 import { soundingStats } from './stats';
+import { TrendChart } from './TrendChart';
 
 const fmt = (v: number, digits = 0, unit = '') => (Number.isNaN(v) ? '–' : `${v.toFixed(digits)}${unit}`);
 
@@ -108,6 +109,8 @@ export function SoundingPanel() {
           )}
         </>
       )}
+      {/* Outside the block above: the run on screen may have no sounding while other runs of the loop do. */}
+      <TrendChart />
     </aside>
   );
 }
