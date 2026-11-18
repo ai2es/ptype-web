@@ -1,11 +1,12 @@
 /**
- * Model trend at the selected point: the four class probabilities and the uncertainty from every run
- * valid at the time on screen, oldest run on the left and the analysis on the right, like the slider.
+ * The network's output at the selected point along the loop, in the same left-to-right order as the slider:
+ * every forecast hour of the run (run mode), or every run valid at the time on screen, oldest first
+ * (trend mode). Four class probabilities and the uncertainty.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PTYPE_STYLES, UNCERTAINTY_COLOR } from '../config/ptypeStyle';
 import { frameIndex, loopFrames, useApp } from '../state/store';
-import { formatInit } from '../time/times';
+import { formatInit, formatUtc, validDate } from '../time/times';
 import { leadLabels, validIso, type Frame } from '../time/trend';
 import { loadTrendSeries, type TrendValue } from './trendSeries';
 
@@ -33,7 +34,7 @@ function marker(shape: (typeof SERIES)[number]['shape'], x: number, y: number, r
   }
 }
 
-/** The point's forecast from every run of the loop, filled in as the soundings arrive. */
+/** The point's forecast from every frame of the loop, filled in as the soundings arrive. */
 function useTrendSeries(frames: Frame[], key: string | null) {
   const manifest = useApp((s) => s.manifest);
   const [values, setValues] = useState<{ key: string | null; byLead: Map<number, TrendValue> }>({ key: null, byLead: new Map() });
@@ -44,8 +45,11 @@ function useTrendSeries(frames: Frame[], key: string | null) {
     let cancelled = false;
     const byLead = new Map<number, TrendValue>();
     setValues({ key, byLead });
-    const point = useApp.getState().point!;
-    void loadTrendSeries(framesRef.current, manifest, point.lon, point.lat, (frame, value) => {
+    const { point, init, fhour } = useApp.getState();
+    // Nearest to the frame on screen first, so the part of the chart being looked at fills in first.
+    const at = frameIndex(framesRef.current, { init, fhour });
+    const order = framesRef.current.map((f, k) => ({ f, d: Math.abs(k - at) })).sort((a, b) => a.d - b.d).map((o) => o.f);
+    void loadTrendSeries(order, manifest, point!.lon, point!.lat, (frame, value) => {
       byLead.set(frame.fhour, value);
       setValues({ key, byLead: new Map(byLead) });
     }, () => cancelled);
@@ -56,7 +60,7 @@ function useTrendSeries(frames: Frame[], key: string | null) {
   return values.key === key ? values.byLead : new Map<number, TrendValue>();
 }
 
-export function TrendChart() {
+export function PointSeries() {
   const mode = useApp((s) => s.mode);
   const init = useApp((s) => s.init);
   const fhour = useApp((s) => s.fhour);
@@ -64,11 +68,16 @@ export function TrendChart() {
   const setFrame = useApp((s) => s.setFrame);
   const [hover, setHover] = useState<number | null>(null);
 
-  const valid = init ? validIso(init, fhour) : null;
-  const frames = useMemo(() => (init && mode === 'trend' ? loopFrames({ mode, init, fhour }) : []), [mode, valid]); // the loop changes only with the valid time
-  const key = mode === 'trend' && valid && point ? `${valid}|${point.lon.toFixed(3)},${point.lat.toFixed(3)}` : null;
-  const byLead = useTrendSeries(frames, key);
-  if (!key || frames.length === 0) return null;
+  const trend = mode === 'trend';
+  // The loop changes only with the run (run mode) or the valid time (trend mode), not with every step.
+  const loopKey = !init ? null : trend ? `trend|${validIso(init, fhour)}` : `run|${init}`;
+  const frames = useMemo(() => (init ? loopFrames({ mode, init, fhour }) : []), [loopKey]);
+  const key = loopKey && point ? `${loopKey}|${point.lon.toFixed(3)},${point.lat.toFixed(3)}` : null;
+  const manifest = useApp((s) => s.manifest);
+  // Nothing to chart when no frame of the loop has a precipitation-type forecast (a run that was not generated).
+  const any = frames.some((f) => manifest?.get(f.init)?.forecastHours.includes(f.fhour));
+  const byLead = useTrendSeries(frames, any ? key : null);
+  if (!key || !any) return null;
 
   const n = frames.length;
   const x = (k: number) => PAD.left + (n === 1 ? 0.5 : k / (n - 1)) * (W - PAD.left - PAD.right);
@@ -77,8 +86,11 @@ export function TrendChart() {
   const loaded = frames.filter((f) => byLead.get(f.fhour) !== undefined).length;
   const withForecast = frames.filter((f) => byLead.get(f.fhour)).length;
   // Leads beyond 18 h come only from the six-hourly runs: the steps left of this position are 6 h, right of it 1 h.
-  const firstHourly = frames.findIndex((f) => f.fhour <= 18);
-  const ticks = leadLabels(frames.map((f) => f.fhour));
+  const firstHourly = trend ? frames.findIndex((f) => f.fhour <= 18) : -1;
+  const ticks = trend ? leadLabels(frames.map((f) => f.fhour)) : frames.flatMap((f, index) => (f.fhour % 6 === 0 ? [{ index, text: String(f.fhour) }] : []));
+  // A 48-hour run has twice as many points as a trend loop, so its markers are smaller.
+  const dot = n > 30 ? 1.9 : 2.6;
+  const label = (f: Frame) => (trend ? `Run ${formatInit(f.init)} · F${String(f.fhour).padStart(2, '0')}` : `F${String(f.fhour).padStart(2, '0')} · ${formatUtc(validDate(f.init, f.fhour))}`);
   const shown = hover ?? at;
   const shownValue = byLead.get(frames[shown]?.fhour);
 
@@ -105,7 +117,7 @@ export function TrendChart() {
 
   return (
     <section className="trend-chart">
-      <h3>Model trend at this point</h3>
+      <h3>{trend ? 'Model trend at this point' : 'Forecast at this point'}</h3>
       <ul className="trend-key">
         {SERIES.map((s) => (
           <li key={s.id}>
@@ -117,7 +129,7 @@ export function TrendChart() {
           </li>
         ))}
       </ul>
-      <svg className="trend-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Precipitation type probabilities and uncertainty at this point from each model run, longest lead on the left">
+      <svg className="trend-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Precipitation type probabilities and uncertainty at this point ${trend ? 'from each model run, longest lead on the left' : 'at each forecast hour of the run'}`}>
         {[0, 0.25, 0.5, 0.75, 1].map((v) => (
           <g key={v}>
             <line className="trend-grid" x1={PAD.left} x2={W - PAD.right} y1={y(v)} y2={y(v)} />
@@ -129,7 +141,7 @@ export function TrendChart() {
           <text key={index} className="trend-tick" x={x(index)} y={H - PAD.bottom + 11} textAnchor="middle">{text}</text>
         ))}
         <text className="trend-tick" x={(PAD.left + W - PAD.right) / 2} y={H - 4} textAnchor="middle">
-          Lead time (h){firstHourly > 0 ? ' · runs 6 h apart left of the dashed line, 1 h right' : ''}
+          {trend ? `Lead time (h)${firstHourly > 0 ? ' · runs 6 h apart left of the dashed line, 1 h right' : ''}` : 'Forecast hour'}
         </text>
         <line className="trend-now" x1={x(at)} x2={x(at)} y1={PAD.top} y2={H - PAD.bottom} />
         {hover !== null && hover !== at && <line className="trend-hover" x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={H - PAD.bottom} />}
@@ -138,7 +150,7 @@ export function TrendChart() {
             <path d={path(s.value)} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeDasharray={s.id === 'u' ? '4 3' : undefined} />
             {s.shape !== 'none' && frames.map((f, k) => {
               const p = byLead.get(f.fhour);
-              return p && <path key={k} d={marker(s.shape, x(k), y(s.value(p)), k === shown ? 4 : 2.6)} fill={s.color} stroke="#fff" strokeWidth="1" />;
+              return p && <path key={k} d={marker(s.shape, x(k), y(s.value(p)), k === shown ? 4 : dot)} fill={s.color} stroke="#fff" strokeWidth="1" />;
             })}
           </g>
         ))}
@@ -155,11 +167,11 @@ export function TrendChart() {
             setFrame(pick(e));
           }}
         >
-          <title>Click to show that run on the map</title>
+          <title>{trend ? 'Click to show that run on the map' : 'Click to show that hour on the map'}</title>
         </rect>
       </svg>
       <p className="trend-readout" role="status">
-        <b>Run {formatInit(frames[shown].init)} · F{String(frames[shown].fhour).padStart(2, '0')}</b>{' '}
+        <b>{label(frames[shown])}</b>{' '}
         {shownValue === undefined
           ? 'loading…'
           : shownValue === null
@@ -167,21 +179,21 @@ export function TrendChart() {
             : SERIES.map((s) => `${s.label} ${Math.round(s.value(shownValue) * 100)}%`).join(' · ')}
       </p>
       <p className="hint">
-        {loaded < n ? `Loading runs: ${loaded}/${n}. ` : withForecast < n ? `${withForecast} of ${n} runs have a precipitation-type forecast here. ` : ''}
-        Forecasts as stored, without sounding edits. Click the chart to show a run.
+        {loaded < n ? `Loading ${trend ? 'runs' : 'hours'}: ${loaded}/${n}. ` : withForecast < n ? `${withForecast} of ${n} ${trend ? 'runs' : 'hours'} have a precipitation-type forecast here. ` : ''}
+        Forecasts as stored, without sounding edits. Click the chart to show {trend ? 'a run' : 'an hour'}.
       </p>
       <details className="trend-table">
         <summary>Values as a table</summary>
         <table>
           <thead>
-            <tr><th>Run</th><th>Lead</th>{SERIES.map((s) => <th key={s.id}>{s.label}</th>)}</tr>
+            <tr><th>{trend ? 'Run' : 'Valid (UTC)'}</th><th>{trend ? 'Lead' : 'Hour'}</th>{SERIES.map((s) => <th key={s.id}>{s.label}</th>)}</tr>
           </thead>
           <tbody>
             {frames.map((f) => {
               const p = byLead.get(f.fhour);
               return (
                 <tr key={f.fhour}>
-                  <td>{formatInit(f.init)}</td>
+                  <td>{trend ? formatInit(f.init) : formatUtc(validDate(f.init, f.fhour)).slice(4, -4)}</td>
                   <td>F{String(f.fhour).padStart(2, '0')}</td>
                   {SERIES.map((s) => <td key={s.id}>{p ? `${Math.round(s.value(p) * 100)}%` : '–'}</td>)}
                 </tr>
