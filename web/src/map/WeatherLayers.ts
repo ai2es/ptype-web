@@ -167,8 +167,8 @@ interface Prebuilt {
  * every grid point it is given on every frame and hides the ones the zoom does not call for in the shader,
  * so the full 1799 x 1059 grid cost 16 ms a frame at any zoom (measured), for a few hundred visible barbs.
  * The barbs are 2^(9 - zoom) cells apart (32 cells at zoom 4), so below zoom 7 every 8th point (30,000
- * barbs) loses nothing. From zoom 7 every 2nd point is kept (477,000): the same barbs as before up to
- * zoom 9, and from there barbs 6 km apart, where the full grid gave 3 km.
+ * barbs) loses nothing. From zoom 7 every 2nd point is kept (477,000): the same barbs as the full grid
+ * gives below zoom 9, and from zoom 9 barbs 6 km apart, where the full grid gave 3 km.
  */
 const BARB_TIERS = [
   { name: 'coarse', step: 8, minZoom: 0, maxZoom: 7 },
