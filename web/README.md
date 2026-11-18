@@ -112,6 +112,25 @@ way for one preloaded 48-hour run with those three layers:
 | Masks | 22 MB | 22 MB | |
 | Total | 1,315 MB | 673 MB | |
 
+### Wind barbs
+
+autumnplot-gl draws a barb at every grid point it is given on every frame and hides the ones the zoom does not
+call for in the shader, and it builds the barb positions afresh for every layer. On the full HRRR grid
+(1.9 million points) that made barbs the slowest layer by far, so `WeatherLayers` gives it two thinned copies
+of the winds, switched by zoom (`BARB_TIERS`: every 8th point below zoom 7, every 2nd from zoom 7), and makes
+every forecast hour share one set of positions, one glyph texture and one shader program. Measured in headless
+WebKit on a desktop:
+
+| | Before | After |
+|---|---|---|
+| Building one hour of barbs | 2.1 s | 0.25 s |
+| Graphics memory per hour | 29 MB | 1.9 MB |
+| Drawing one frame with barbs on, zoom 4.4 | 16 ms | 1.8 ms |
+| Drawing one frame with barbs on, zoom 7 and 10 | 16 ms | 4.4 ms |
+
+The barbs are the same up to zoom 9; at zoom 9 and 10 they are 6 km apart where they were 3 km. With
+`?memdebug` the console also logs the load and build time of each field (`[timing]`).
+
 ## Phones and tablets
 
 - Filled and raster layers and wind barbs are sent to the graphics card as 16-bit floats (`src/map/float16.ts`):

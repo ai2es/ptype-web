@@ -4,7 +4,7 @@ import { HrrrUnavailable, fetchHrrrMessage, messageCacheCapacity, releaseHrrrExc
 import { storeUrl } from '../data/manifest';
 import { prefetchOrder, startPrefetch, stopPrefetch } from '../data/prefetch';
 import { chooseLevel, frameCacheRoom, hasPtypeFrame, openPtypeStore, readPtypeFrame, releasePtypeExcept } from '../data/ptype';
-import { keepOldRuns } from '../debug/memory';
+import { keepOldRuns, memoryDebug } from '../debug/memory';
 import { FIELD_BY_ID } from '../fields/registry';
 import { frameIndex, loopFrames, useApp } from '../state/store';
 import { validIso, type Frame, type KeepFrame } from '../time/trend';
@@ -89,6 +89,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
       }
       setLayerStatus(id, 'loading');
       const used: string[] = [];
+      const started = performance.now();
       def
         .load((search) => {
           used.push(search);
@@ -96,8 +97,11 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
         })
         .then(async (data) => {
           if (canPrebuild(def)) {
+            const loaded = performance.now();
             // Build even if the user has moved on: the hour stays available for when they come back.
             await layers.prebuildField({ ...def, id: layerId }, hourKey, data);
+            // With ?memdebug: how long the download and decode took, and how long building the layer took.
+            if (memoryDebug) console.info(`[timing] ${id} F${fhour} load ${Math.round(loaded - started)} ms build ${Math.round(performance.now() - loaded)} ms`);
             // The layer now lives in graphics memory; the decoded messages behind it are not needed again.
             for (const search of used) releaseHrrrMessage(init, fhour, search);
             if (gen !== fieldGen.current) return;
