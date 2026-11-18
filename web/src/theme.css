@@ -40,7 +40,9 @@ button, select, input { font: inherit; color: inherit; }
 .about-button { margin-left: 8px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.6); background: transparent; color: #fff; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; vertical-align: 2px; }
 .about-button:hover { background: rgba(255, 255, 255, 0.18); }
 .dialog .citation { font-size: 12px; color: var(--gray-11); }
-.dialog .citation a, .link-list a { color: var(--ncar-blue); }
+.dialog .citation a, .link-list a, .dialog p a, .layer-note a { color: var(--ncar-blue); }
+/* The dialog has grown past a short screen's height; let it scroll inside the backdrop. */
+.dialog { max-height: calc(100vh - 32px); overflow-y: auto; }
 .link-list { margin: 0 0 14px; padding-left: 18px; }
 .link-list li { margin-bottom: 4px; }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
