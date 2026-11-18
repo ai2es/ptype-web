@@ -29,10 +29,10 @@ export function TimeBar() {
   const indexOf = new Map(frames.map((f, k) => [f.fhour, k]));
   const entry = init ? manifest?.get(init) : undefined;
   const loading = Object.values(layerStatus).includes('loading');
-  // The frame on screen counts as in memory once its layers have drawn.
-  const buffered = preloadRun && prefetch ? [...new Set([...prefetch.ready, ...(loading ? [] : [fhour])])] : [];
+  // The frame on screen counts as in memory once its layers have drawn, and not before.
+  const buffered = preloadRun && prefetch ? [...new Set([...prefetch.ready.filter((h) => h !== fhour), ...(loading ? [] : [fhour])])] : [];
   const missing = trend && prefetch ? prefetch.failed : [];
-  const count = `${(prefetch?.ready.length ?? 0) + 1}/${frames.length}`;
+  const count = `${prefetch?.ready.length ?? 0}/${frames.length}`;
   // Fixed-width text so the bar does not shift as the count changes.
   const preloadLabel = !preloadRun || !prefetch
     ? ''
