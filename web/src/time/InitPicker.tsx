@@ -94,7 +94,11 @@ export function InitPicker() {
                 className={`hour${h === initHour(init) ? ' selected' : ''}${ptypeHours.has(h) ? ' has-ptype' : ''}`}
                 title={`${String(h).padStart(2, '0')}Z${trend ? '' : ` · forecasts to ${maxForecastHour(h)} h`}${ptypeHours.has(h) ? ' · precipitation type available' : ''}`}
                 disabled={trend && trendFrames(makeInit(Number(day.slice(0, 4)), Number(day.slice(5, 7)), Number(day.slice(8, 10)), h)).length === 0}
-                onClick={() => pick(day, h)}
+                onClick={() => {
+                  // The hour completes the choice (the day comes first), so the calendar gets out of the way.
+                  pick(day, h);
+                  setOpen(false);
+                }}
               >
                 {String(h).padStart(2, '0')}
               </button>
