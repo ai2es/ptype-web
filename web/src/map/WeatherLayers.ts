@@ -19,7 +19,8 @@ import { isLowMemoryDevice } from '../config/device';
 import { registerMemoryStats } from '../debug/memory';
 import { toFloat16 } from './float16';
 import { ANCHOR_FILLS, ANCHOR_LINES, LABEL_FONT } from './style';
-import { BinnedRaster, PTYPE_CMAP, dominantField } from './ptypeField';
+import { BinnedRaster } from './binnedRaster';
+import { PTYPE_CMAP, dominantField } from './ptypeField';
 
 type Comp = PlotComponent<MapLibreMap>;
 type AnyGrid = LambertGrid;
