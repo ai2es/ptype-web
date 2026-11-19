@@ -19,7 +19,7 @@ import { isLowMemoryDevice } from '../config/device';
 import { registerMemoryStats } from '../debug/memory';
 import { toFloat16 } from './float16';
 import { ANCHOR_FILLS, ANCHOR_LINES, LABEL_FONT } from './style';
-import { PTYPE_CMAP, dominantField } from './ptypeField';
+import { BinnedRaster, PTYPE_CMAP, dominantField } from './ptypeField';
 
 type Comp = PlotComponent<MapLibreMap>;
 type AnyGrid = LambertGrid;
@@ -268,7 +268,7 @@ export class WeatherLayers {
     const payload = { frame, mask };
     await this.apply(id, key, payload, () => {
       const field = (p: typeof payload) => new RawScalarField(grid, toFloat16(dominantField(p.frame, p.mask)));
-      const raster = new Raster(field(payload), { cmap: PTYPE_CMAP, opacity });
+      const raster = new BinnedRaster(field(payload), { cmap: PTYPE_CMAP, opacity });
       return {
         components: [{ id: `${id}-raster`, comp: raster as Comp, anchor: ANCHOR_FILLS }],
         update: (p) => raster.updateField(field(p as typeof payload)),
