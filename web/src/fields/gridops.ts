@@ -85,3 +85,18 @@ export function splitContourLevels(values: Float32Array, interval: number, coars
   for (let n = Math.ceil(lo / interval); n * interval <= hi; n++) (n % step === 0 ? out.coarse : out.fine).push(n * interval);
   return out;
 }
+
+/** Metres of snow to inches, the unit US snowfall forecasts are given in. */
+export const INCHES_PER_METRE = 39.3701;
+
+/**
+ * Snowfall over the last hour, in inches, from two run-total accumulations in metres (the HRRR's ASNOW at
+ * this forecast hour and the one before). The total can only grow, so a small negative difference is the
+ * GRIB packing of the two files rounding differently, not melting; it is drawn as none.
+ */
+export function hourlySnowfallInches(total: Float32Array, previous: Float32Array | null): Float32Array {
+  const out = new Float32Array(total.length);
+  if (!previous) return out;
+  for (let k = 0; k < out.length; k++) out[k] = Math.max(0, total[k] - previous[k]) * INCHES_PER_METRE;
+  return out;
+}

@@ -20,7 +20,7 @@ function statusFor(err: unknown) {
 /** Warm the caches for the next frame so animation does not stall. */
 function preload({ init, fhour }: Frame, fieldIds: string[]) {
   for (const id of fieldIds) {
-    FIELD_BY_ID.get(id)?.load((search) => fetchHrrrMessage(init, fhour, search)).catch(() => undefined);
+    FIELD_BY_ID.get(id)?.load((search, back = 0) => fetchHrrrMessage(init, fhour - back, search), fhour).catch(() => undefined);
   }
 }
 
@@ -93,13 +93,14 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
         continue;
       }
       setLayerStatus(id, 'loading');
-      const used: string[] = [];
+      // Each message a field read, with the forecast hour it came from (a few fields read the hour before too).
+      const used: [number, string][] = [];
       const started = performance.now();
       def
-        .load((search) => {
-          used.push(search);
-          return fetchHrrrMessage(init, fhour, search);
-        })
+        .load((search, back = 0) => {
+          used.push([fhour - back, search]);
+          return fetchHrrrMessage(init, fhour - back, search);
+        }, fhour)
         .then(async (data) => {
           if (canPrebuild(def)) {
             const loaded = performance.now();
@@ -108,7 +109,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
             // With ?memdebug: how long the download and decode took, and how long building the layer took.
             if (memoryDebug) console.info(`[timing] ${id} F${fhour} load ${Math.round(loaded - started)} ms build ${Math.round(performance.now() - loaded)} ms`);
             // The layer now lives in graphics memory; the decoded messages behind it are not needed again.
-            for (const search of used) releaseHrrrMessage(init, fhour, search);
+            for (const [fh, search] of used) releaseHrrrMessage(init, fh, search);
             if (gen !== fieldGen.current) return;
             layers.showPrebuilt(layerId, hourKey);
             setLayerStatus(id, 'ok');
@@ -250,22 +251,25 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
             const hourKey = `${init}|${fh}`;
             // Messages that only fed a prebuilt layer are released afterwards; those a filled layer or the
             // mask needs stay cached, and only they count against the memory budget (through `fetch`).
-            const built = new Set<string>();
+            const built = new Map<string, [number, string]>();
             const kept = new Set<string>();
-            const keep = (search: string) => {
+            // A message from an earlier hour is fetched outside the budget: it is released as soon as the layer
+            // is built, like every message that only feeds a prebuilt layer.
+            const keep = (search: string, back = 0) => {
+              if (back) return fetchHrrrMessage(init, fh - back, search);
               kept.add(search);
               return fetch(search);
             };
             const jobs: Promise<unknown>[] = fields.map(async (id) => {
               const def = FIELD_BY_ID.get(id);
               if (!def) return;
-              if (!canPrebuild(def)) return def.load(keep);
+              if (!canPrebuild(def)) return def.load(keep, fh);
               const layerId = `field-${id}`;
               if (layers.hasPrebuilt(layerId, hourKey)) return;
-              const data = await def.load((search) => {
-                built.add(search);
-                return fetchHrrrMessage(init, fh, search);
-              });
+              const data = await def.load((search, back = 0) => {
+                built.set(`${fh - back}|${search}`, [fh - back, search]);
+                return fetchHrrrMessage(init, fh - back, search);
+              }, fh);
               await layers.prebuildField({ ...def, id: layerId }, hourKey, data);
             });
             let fits = true;
@@ -281,7 +285,7 @@ export function useWeatherData(layers: WeatherLayers | null, view: { zoom: numbe
               }
             }
             await Promise.all(jobs);
-            for (const search of built) if (!kept.has(search)) releaseHrrrMessage(init, fh, search);
+            for (const [hour, search] of built.values()) if (hour !== fh || !kept.has(search)) releaseHrrrMessage(init, hour, search);
             return fits;
           },
         },
