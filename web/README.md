@@ -140,6 +140,19 @@ contours to the plain basemap (`src/map/terrain.ts`).
 - **Contours** are in feet, spaced from 5,000 ft at the continental view to 200 ft at zoom 9 and above
   (`CONTOUR_THRESHOLDS`); every fifth or so is heavier and, from zoom 6, labelled.
 
+### Snow depth and snowfall rate
+
+Two HRRR layers in the precipitation group, both drawn in inches (`src/fields/registry.ts`):
+
+- **Snow depth** is the HRRR's `SNOD` (snow on the ground, metres) at the forecast hour.
+- **Snowfall rate** is the snow that fell in the past hour. The HRRR has no hourly snowfall depth: `ASNOW` is
+  the total since the start of the run, so the layer subtracts the previous forecast hour's total from this
+  one's. That is why a field's loader can ask for a message from an earlier hour of the same run
+  (`FieldFetch`, `hoursBack`), and why the layer is empty at F00. Each hour therefore downloads two messages.
+
+Values under 0.1 in of depth and 0.05 in per hour are not drawn. Checked on the run of 2026-11-23 12Z at F06:
+no grid cell had a total that went down between F05 and F06, and the largest hourly amount was 2.55 in.
+
 ### Wind barbs
 
 autumnplot-gl draws a barb at every grid point it is given on every frame and hides the ones the zoom does not
