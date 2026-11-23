@@ -6,7 +6,7 @@
 import { ColorMap, colormaps } from '../vendor/apgl';
 import type { HrrrGridInfo, HrrrMessage } from '../data/hrrr';
 import { PTYPE_STYLES } from '../config/ptypeStyle';
-import { combine, mapValues, smooth, thin, wetBulbStull } from './gridops';
+import { INCHES_PER_METRE, combine, hourlySnowfallInches, mapValues, smooth, thin, wetBulbStull } from './gridops';
 
 export type FieldData =
   | { kind: 'scalar'; grid: HrrrGridInfo; values: Float32Array }
@@ -35,6 +35,13 @@ export type FieldStyle =
   | { type: 'fill' | 'raster'; cmap: ColorMap; opacity: number; colorbar?: { label: string; ticks?: number[] } }
   | { type: 'barbs'; color: string; thinFac: number };
 
+/**
+ * Fetches one GRIB message of the run being drawn. `hoursBack` reads it from an earlier forecast hour of the
+ * same run instead (1 = the hour before): the HRRR gives snowfall only as a total since the start of the run,
+ * so an hourly amount is the difference between two files.
+ */
+export type FieldFetch = (search: string, hoursBack?: number) => Promise<HrrrMessage>;
+
 export interface FieldDef {
   id: string;
   label: string;
@@ -43,7 +50,8 @@ export interface FieldDef {
   note: string;
   /** Colour swatch for the layer menu. */
   swatch: string;
-  load(fetch: (search: string) => Promise<HrrrMessage>): Promise<FieldData>;
+  /** `fhour` is the forecast hour being drawn, for fields that depend on it (see `FieldFetch`). */
+  load(fetch: FieldFetch, fhour: number): Promise<FieldData>;
   style: FieldStyle;
 }
 
@@ -88,6 +96,24 @@ function celsiusContour(id: string, label: string, group: FieldDef['group'], sea
 }
 
 const thicknessCmap = new ColorMap([4000, 5410, 7000], ['#1f5fbf', '#c62828']);
+
+/**
+ * Snow on the ground, inches. Bins widen with depth, as on NWS snow maps; anything under a tenth of an inch is
+ * not drawn. Pale yellow-green to navy (ColorBrewer YlGnBu), so it reads apart from the snow blues of the
+ * precipitation-type layer.
+ */
+const snowDepthCmap = new ColorMap(
+  [0.1, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48],
+  ['#edf8b1', '#c7e9b4', '#7fcdbb', '#41b6c4', '#1d91c0', '#225ea8', '#253494', '#081d58', '#4a1486', '#7a0177'],
+  { overflow_color: '#ae017e' },
+);
+
+/** Snowfall in the past hour, inches. An inch an hour is heavy snow; pinks to wine (ColorBrewer PuRd). */
+const snowfallRateCmap = new ColorMap(
+  [0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3],
+  ['#e7e1ef', '#d4b9da', '#c994c7', '#df65b0', '#e7298a', '#ce1256', '#980043', '#67001f'],
+  { overflow_color: '#3d0012' },
+);
 
 const hrrrPtypeCmap = new ColorMap(
   [0.5, 1.5, 2.5, 3.5, 4.5],
@@ -177,6 +203,31 @@ export const FIELDS: FieldDef[] = [
       return { kind: 'scalar', grid: msg.grid, values: msg.data };
     },
     style: { type: 'raster', cmap: colormaps.nws_storm_clear_refl.withOpacity((lower) => (lower < 0 ? 0 : 1)), opacity: 0.7, colorbar: { label: 'Composite reflectivity (dBZ)', ticks: [0, 20, 40, 60] } },
+  },
+  {
+    id: 'snod',
+    label: 'Snow depth',
+    group: 'HRRR precipitation',
+    note: 'inches on the ground',
+    swatch: '#1d91c0',
+    load: async (fetch) => {
+      const msg = await fetch(':SNOD:surface:');
+      return { kind: 'scalar', grid: msg.grid, values: mapValues(msg.data, (v) => v * INCHES_PER_METRE) };
+    },
+    style: { type: 'raster', cmap: snowDepthCmap, opacity: 0.75, colorbar: { label: 'Snow depth (in)', ticks: [0.1, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48] } },
+  },
+  {
+    id: 'snowrate',
+    label: 'Snowfall rate',
+    group: 'HRRR precipitation',
+    note: 'inches of snow in the past hour; nothing at F00',
+    swatch: '#e7298a',
+    load: async (fetch, fhour) => {
+      // ASNOW is the snowfall since the start of the run, so the hour's amount needs the file before as well.
+      const [total, previous] = await Promise.all([fetch(':ASNOW:surface:'), fhour > 0 ? fetch(':ASNOW:surface:', 1) : null]);
+      return { kind: 'scalar', grid: total.grid, values: hourlySnowfallInches(total.data, previous?.data ?? null) };
+    },
+    style: { type: 'raster', cmap: snowfallRateCmap, opacity: 0.8, colorbar: { label: 'Snowfall in the past hour (in)', ticks: [0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3] } },
   },
   {
     id: 'hrrr_ptype',
