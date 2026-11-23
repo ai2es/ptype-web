@@ -1,6 +1,7 @@
 import { BOURGOUIN_URL } from './AboutDialog';
 import { useState } from 'react';
 import { FIELDS } from '../fields/registry';
+import type { PlaceId } from '../map/schools';
 import { useApp, type BoundaryId, type LayerStatus } from '../state/store';
 
 const BOUNDARIES: { id: BoundaryId; label: string }[] = [
@@ -9,6 +10,12 @@ const BOUNDARIES: { id: BoundaryId; label: string }[] = [
   { id: 'cwas', label: 'NWS forecast offices (CWAs)' },
   { id: 'highways', label: 'Highways' },
   { id: 'cities', label: 'Cities' },
+];
+
+const PLACES: { id: PlaceId; label: string; mark: string }[] = [
+  { id: 'districts', label: 'Unified school districts', mark: 'mark-district' },
+  { id: 'publicSchools', label: 'Public schools', mark: 'mark-public' },
+  { id: 'privateSchools', label: 'Private schools', mark: 'mark-private' },
 ];
 
 const STATUS_TEXT: Record<LayerStatus, string> = {
@@ -106,6 +113,21 @@ export function LayerMenu() {
             <span>{b.label}</span>
           </label>
         ))}
+      </section>
+
+      <section>
+        <h3>Schools</h3>
+        {PLACES.map((p) => (
+          <label className="check" key={p.id}>
+            <input type="checkbox" checked={s.places[p.id]} onChange={() => s.togglePlace(p.id)} />
+            <i className={`place-mark ${p.mark}`} />
+            <span>{p.label}</span>
+          </label>
+        ))}
+        <p className="layer-note">
+          From <a href="https://nces.ed.gov/programs/edge" target="_blank" rel="noreferrer">NCES EDGE</a>. Districts appear from zoom 6 and schools from zoom 8;
+          areas served by separate elementary and secondary districts have no outline.
+        </p>
       </section>
 
       <section>

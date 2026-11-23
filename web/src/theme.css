@@ -114,6 +114,13 @@ button, select, input { font: inherit; color: inherit; }
 .map-error { position: absolute; inset: 0; display: grid; place-items: center; background: var(--panel); padding: 24px; text-align: center; }
 .hover-readout { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); display: flex; gap: 12px; align-items: baseline; background: rgba(255, 255, 255, 0.94); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 10px; font-size: 12px; font-weight: 500; white-space: nowrap; pointer-events: none; }
 .hover-coords { color: var(--gray-11); font-weight: 400; }
+/* School and district names go on their own row under the probabilities. */
+.hover-readout { flex-wrap: wrap; justify-content: center; max-width: calc(100% - 20px); }
+.hover-place { flex-basis: 100%; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; white-space: normal; }
+.place-mark { flex: none; width: 10px; height: 10px; margin-top: 4px; box-sizing: border-box; }
+.mark-district { border: 1.5px solid #6a3d9a; }
+.mark-public { border-radius: 50%; background: #1d1d1f; }
+.mark-private { border-radius: 50%; border: 1.5px solid #1d1d1f; background: #ffffff; }
 
 /* Layer menu */
 .layer-menu { position: absolute; top: 10px; left: 10px; width: 268px; max-height: calc(100% - 150px); overflow-y: auto; background: rgba(255, 255, 255, 0.96); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); }
