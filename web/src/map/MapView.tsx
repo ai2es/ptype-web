@@ -5,6 +5,7 @@ import { siteUrl } from '../config/dataSources';
 import { PTYPE_STYLES } from '../config/ptypeStyle';
 import { useApp, type BoundaryId } from '../state/store';
 import { sampleHover, type HoverValue } from './hoverData';
+import { placesAt, setPlaces, type PlaceHover } from './schools';
 import { BOUNDARY_LAYERS, buildStyle } from './style';
 import { setBasemap } from './terrain';
 import { useWeatherData } from './useWeatherData';
@@ -21,12 +22,13 @@ export function MapView() {
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const [layers, setLayers] = useState<WeatherLayers | null>(null);
   const [view, setView] = useState({ zoom: INITIAL_VIEW.zoom, lat: INITIAL_VIEW.center[1] });
-  const [hover, setHover] = useState<(HoverValue & { lon: number; lat: number }) | null>(null);
+  const [hover, setHover] = useState<{ lon: number; lat: number; value: HoverValue | null; place: PlaceHover | null } | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
 
   const boundaries = useApp((s) => s.boundaries);
   const point = useApp((s) => s.point);
   const basemap = useApp((s) => s.basemap);
+  const places = useApp((s) => s.places);
 
   useEffect(() => {
     if (!container.current) return;
@@ -57,10 +59,15 @@ export function MapView() {
     // Custom layers can be added as soon as the style is in place; no need to wait for tiles.
     map.once('style.load', () => setLayers(new WeatherLayers(map)));
     map.on('moveend', () => setView({ zoom: map.getZoom(), lat: map.getCenter().lat }));
-    map.on('click', (e) => useApp.getState().setPoint({ lon: e.lngLat.lng, lat: e.lngLat.lat }));
+    map.on('click', (e) => {
+      // A click on a school opens the sounding at the school, not a few pixels beside it.
+      const school = placesAt(map, e.point)?.schoolLngLat;
+      useApp.getState().setPoint(school ? { lon: school[0], lat: school[1] } : { lon: e.lngLat.lng, lat: e.lngLat.lat });
+    });
     map.on('mousemove', (e) => {
-      const v = sampleHover(e.lngLat.lng, e.lngLat.lat);
-      setHover(v ? { ...v, lon: e.lngLat.lng, lat: e.lngLat.lat } : null);
+      const value = sampleHover(e.lngLat.lng, e.lngLat.lat);
+      const place = placesAt(map, e.point);
+      setHover(value || place ? { lon: e.lngLat.lng, lat: e.lngLat.lat, value, place } : null);
     });
     map.on('mouseout', () => setHover(null));
     map.getCanvas().style.cursor = 'crosshair';
@@ -94,6 +101,13 @@ export function MapView() {
     setBasemap(maplibregl, map, basemap).catch((err) => console.error('terrain basemap:', err));
   }, [basemap, layers]);
 
+  // School and district layers. A failure (the archive not loading) leaves the map as it was.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !layers) return;
+    setPlaces(maplibregl, map, places).catch((err) => console.error('school layers:', err));
+  }, [places, layers]);
+
   // Marker at the selected sounding point.
   useEffect(() => {
     const map = mapRef.current;
@@ -111,14 +125,20 @@ export function MapView() {
       {hover && (
         <div className="hover-readout" aria-hidden="true">
           <div className="hover-coords">
-            {hover.lat.toFixed(2)}°, {hover.lon.toFixed(2)}°{hover.shown ? '' : ' · no HRRR precip'}
+            {hover.lat.toFixed(2)}°, {hover.lon.toFixed(2)}°{!hover.value || hover.value.shown ? '' : ' · no HRRR precip'}
           </div>
-          {PTYPE_STYLES.map((s, k) => (
+          {hover.value && PTYPE_STYLES.map((s, k) => (
             <span key={s.id} style={{ color: s.color }}>
-              {s.label} {Math.round(hover.probs[k] * 100)}%
+              {s.label} {Math.round(hover.value!.probs[k] * 100)}%
             </span>
           ))}
-          <span>Uncertainty {hover.u.toFixed(2)}</span>
+          {hover.value && <span>Uncertainty {hover.value.u.toFixed(2)}</span>}
+          {hover.place && (
+            <div className="hover-place">
+              {hover.place.school && <span>{hover.place.school}</span>}
+              {hover.place.district && <span>{hover.place.district}</span>}
+            </div>
+          )}
         </div>
       )}
     </div>

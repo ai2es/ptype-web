@@ -2,6 +2,7 @@
 import { hrrrAvailable } from '../data/hrrr';
 import { fetchManifest } from '../data/manifest';
 import { FIELD_BY_ID } from '../fields/registry';
+import { formatPlaces, parsePlaces } from '../map/schools';
 import { normalizeInit, shiftInit, toInitIso, type InitIso } from '../time/times';
 import { watchManifest } from './refresh';
 import { maxFhour, useApp } from './store';
@@ -32,6 +33,7 @@ function readUrl() {
   if (q.has('fields')) patch.activeFields = q.get('fields')!.split(',').filter((id) => FIELD_BY_ID.has(id));
   if (q.get('mode') === 'trend') patch.mode = 'trend';
   if (q.get('basemap') === 'terrain') patch.basemap = 'terrain';
+  if (q.has('places')) patch.places = parsePlaces(q.get('places'));
   const fh = Number(q.get('fh'));
   return { init, fhour: q.has('fh') && Number.isInteger(fh) && fh >= 0 ? fh : null, patch };
 }
@@ -44,6 +46,7 @@ function writeUrl() {
   q.set('fh', String(s.fhour));
   if (s.mode === 'trend') q.set('mode', 'trend');
   if (s.basemap === 'terrain') q.set('basemap', 'terrain');
+  if (formatPlaces(s.places)) q.set('places', formatPlaces(s.places));
   if (s.point) {
     q.set('lat', s.point.lat.toFixed(3));
     q.set('lon', s.point.lon.toFixed(3));

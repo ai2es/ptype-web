@@ -140,6 +140,29 @@ contours to the plain basemap (`src/map/terrain.ts`).
 - **Contours** are in feet, spaced from 5,000 ft at the continental view to 200 ft at zoom 9 and above
   (`CONTOUR_THRESHOLDS`); every fifth or so is heavier and, from zoom 6, labelled.
 
+### Schools and school districts
+
+The layer menu's **Schools** section (or `?places=districts,public,private` in the address) draws unified
+school district boundaries, public schools and private schools (`src/map/schools.ts`). All three are off by
+default.
+
+- **Data.** [NCES EDGE](https://nces.ed.gov/programs/edge), read from its public map services by
+  `tools/build_schools.sh` (needs GDAL and tippecanoe; about two minutes). The build of 2026-11-23 holds
+  102,178 public schools, 22,510 private schools and 10,867 unified districts, the counts the services
+  report. Areas served by separate elementary and secondary districts have no outline.
+- **Format.** One vector-tile archive, `public/overlays/schools.pmtiles` (15 MB), read with byte-range
+  requests so only the tiles in view are downloaded. Districts are tiled for zooms 5 to 8 and schools at
+  zoom 8, with every school kept; the map stretches zoom 8 tiles up to its zoom 10 limit. Tiling districts
+  to zoom 10 made the archive 32 MB for detail smaller than a pixel.
+- **Cost when off.** The archive reader (`pmtiles`) and the archive are only requested when a toggle is
+  first switched on (checked: no `schools.pmtiles` request before, three range requests after).
+- **On the map.** District outlines appear from zoom 6 and their names from zoom 8; schools from zoom 8,
+  public as solid dots and private as rings. Pointing at a school or district adds its name to the readout
+  at the top of the map, and clicking a school opens the sounding at the school.
+- **Hosting.** GitHub Pages compresses binary files, and a range of a compressed file would be useless.
+  Browsers ask for the uncompressed file when they send a range (checked in Chromium against the deployed
+  site: bytes 1000 to 1063 of `model/ptype_model.onnx` matched the file).
+
 ### Snow depth and snowfall rate
 
 Two HRRR layers in the precipitation group, both drawn in inches (`src/fields/registry.ts`):
@@ -212,7 +235,7 @@ override them (see the comment at the top of that file). The build uses relative
 | `src/time/` | calendar, slider, animation, keyboard shortcuts |
 | `src/state/store.ts` | application state (zustand) |
 | `src/vendor/gribjs/` | vendored GRIB2 decoder (see its README) |
-| `tools/` | `export_onnx.py`, `make_sample_data.py`, `make_test_fixtures.py`, `build_overlays.sh` |
+| `tools/` | `export_onnx.py`, `make_sample_data.py`, `make_test_fixtures.py`, `build_overlays.sh`, `build_schools.sh` |
 
 ### Adding an HRRR field
 
@@ -244,3 +267,4 @@ the longest lead or the analysis, and `Shift`+`←`/`→` move the valid time by
 - [autumnplot-gl](https://github.com/tsupinie/autumnplot-gl) draws the fields. Its prebuilt browser bundle is copied to `public/autumnplot/` at build time (see `vite.config.ts`).
 - [gribjs](https://github.com/tsupinie/gribjs) decodes GRIB2 (vendored).
 - Basemap tiles, highways and city labels come from [OpenFreeMap](https://openfreemap.org); counties and NWS county warning areas are GeoJSON in `public/overlays/` (`tools/build_overlays.sh`).
+- School locations and district boundaries come from [NCES EDGE](https://nces.ed.gov/programs/edge) (`tools/build_schools.sh`); the archive is read with [PMTiles](https://github.com/protomaps/PMTiles).

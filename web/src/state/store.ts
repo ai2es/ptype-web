@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import { isLowMemoryDevice } from '../config/device';
 import type { Manifest } from '../data/manifest';
+import type { PlaceId, Places } from '../map/schools';
 import type { PrefetchProgress } from '../data/prefetch';
 import type { Prediction } from '../model/evidential';
 import type { Profile } from '../sounding/profile';
@@ -45,6 +46,8 @@ export interface AppState {
   maskToPrecip: boolean;
   showUncertainty: boolean;
   boundaries: Record<BoundaryId, boolean>;
+  /** School and school district layers (map/schools.ts); all off until asked for. */
+  places: Places;
   /** 'terrain' adds hill shading and elevation contours to the plain basemap (map/terrain.ts). */
   basemap: 'plain' | 'terrain';
   /** Load state per map layer id, for the layer menu. */
@@ -77,6 +80,7 @@ export interface AppState {
   setPoint(point: { lon: number; lat: number } | null): void;
   toggleField(id: string): void;
   toggleBoundary(id: BoundaryId): void;
+  togglePlace(id: PlaceId): void;
   setLayerStatus(id: string, status: LayerStatus | null): void;
   setSounding(patch: Partial<SoundingState>): void;
   set(patch: Partial<AppState>): void;
@@ -122,6 +126,7 @@ export const useApp = create<AppState>((set, get) => ({
   maskToPrecip: true,
   showUncertainty: false,
   boundaries: { states: true, counties: false, cwas: false, highways: true, cities: true },
+  places: { districts: false, publicSchools: false, privateSchools: false },
   basemap: 'plain',
   layerStatus: {},
   // Off by default on phones and tablets: a whole run can exceed what their browsers allow one tab.
@@ -169,6 +174,7 @@ export const useApp = create<AppState>((set, get) => ({
       activeFields: s.activeFields.includes(id) ? s.activeFields.filter((f) => f !== id) : [...s.activeFields, id],
     })),
   toggleBoundary: (id) => set((s) => ({ boundaries: { ...s.boundaries, [id]: !s.boundaries[id] } })),
+  togglePlace: (id) => set((s) => ({ places: { ...s.places, [id]: !s.places[id] } })),
   setLayerStatus: (id, status) =>
     set((s) => {
       const layerStatus = { ...s.layerStatus };
