@@ -258,4 +258,34 @@ kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12
   .layer-menu { width: 240px; }
 }
 
+/* Phones: the header and time bar took 399 of 812 px. Here the time bar is four short rows (mode and run;
+   step buttons, preload and speed; slider; valid time) and the header one line of title. */
+@media (max-width: 600px) {
+  .header { padding: 6px 10px; gap: 8px; }
+  .header .logo-ncar { height: 30px; padding: 3px 6px; }
+  .header h1 { font-size: 14px; line-height: 1.25; }
+  /* Keyboard shortcuts are no use without a keyboard. */
+  .header-right .btn { display: none; }
+  .timebar { gap: 6px 8px; padding: 6px 10px; }
+  .mode-toggle .btn { font-size: 12px; padding: 5px 7px; }
+  .init-button { min-width: 0; padding: 5px 8px; }
+  .init-button .label { display: none; }
+  .init-button .value { font-size: 13px; }
+  /* The run picker's calendar is wider than the space to the right of its button, so it hangs from the bar. */
+  .timebar { position: relative; }
+  .init-picker { position: static; }
+  .popover { top: 40px; left: 10px; width: min(318px, calc(100vw - 20px)); }
+  /* Preload and speed move up beside the step buttons, which would otherwise have a row to themselves. */
+  .transport { order: 1; gap: 2px; }
+  .transport .btn.icon { min-width: 30px; }
+  .preload { order: 2; font-size: 12px; gap: 4px; }
+  .preload-status { min-width: 0; }
+  .speed { order: 3; margin-left: auto; }
+  .speed-label { display: none; }
+  .slider-wrap { order: 4; flex-basis: 100%; min-width: 0; }
+  .valid { order: 5; flex-basis: 100%; gap: 8px; font-size: 12px; }
+  .valid .fhour { font-size: 14px; min-width: 30px; }
+  .valid-time { white-space: nowrap; }
+  .valid .chip { width: auto; margin-left: auto; font-size: 10px; padding: 2px 6px; }
+}
 .layer-note { margin: 2px 0 0 24px; font-size: 11.5px; line-height: 1.35; color: var(--gray-11); }
