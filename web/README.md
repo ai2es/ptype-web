@@ -197,6 +197,10 @@ The barbs are the same up to zoom 9; at zoom 9 and 10 they are 6 km apart where 
 
 ## Phones and tablets
 
+- Below 600 px wide the header is one line of title (the Shortcuts button is hidden) and the time bar is four
+  short rows: mode and run; step buttons, preload and speed; slider; valid time. Measured at 375 x 812, the
+  two together went from 399 px to 191 px and the map from 349 px to 557 px. The run picker's calendar hangs
+  from the bar there, because it is wider than the space beside its button.
 - Below 900 px wide the sounding panel sits under the map. The map is sized to leave a strip of the panel on
   screen, choosing a point jumps to the panel, and the panel has a **Back to map** button. Before this the map
   was 62% of the screen height, which on a phone pushed the whole panel off the screen (measured at 375 x 812:

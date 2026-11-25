@@ -117,7 +117,7 @@ export function TimeBar() {
         <span className="preload-status" role="status">{preloadLabel}</span>
       </label>
       <label className="speed">
-        Speed
+        <span className="speed-label">Speed</span>
         <select value={frameMs} onChange={(e) => setFrameMs(Number(e.target.value))} aria-label="Animation speed">
           {FRAME_SPEEDS.map((ms) => (
             <option key={ms} value={ms}>{(1000 / ms).toFixed(1)} fps</option>
