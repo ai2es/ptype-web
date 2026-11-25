@@ -197,6 +197,11 @@ The barbs are the same up to zoom 9; at zoom 9 and 10 they are 6 km apart where 
 
 ## Phones and tablets
 
+- Below 900 px wide the sounding panel sits under the map. The map is sized to leave a strip of the panel on
+  screen, choosing a point jumps to the panel, and the panel has a **Back to map** button. Before this the map
+  was 62% of the screen height, which on a phone pushed the whole panel off the screen (measured at 375 x 812:
+  the header and time bar take 399 px, and the panel started at 903 px), and a finger on the map pans the map,
+  so there was no way to reach it.
 - Filled and raster layers and wind barbs are sent to the graphics card as 16-bit floats (`src/map/float16.ts`):
   iOS cannot use 32-bit float textures and autumnplot-gl refuses them there.
 - On phones and tablets (`src/config/device.ts`) "Preload run" starts switched off and the caches are much

@@ -239,12 +239,19 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--panel); border: 1px solid var(--gray-4); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
 
 .maplibregl-ctrl-attrib { font-size: 10px; }
+.only-narrow { display: none; }
+.panel-actions { display: flex; gap: 6px; flex: none; }
+.panel-actions .btn { white-space: nowrap; }
 
 /* Narrow screens: the sounding panel moves below the map. */
 @media (max-width: 900px) {
   .main { flex-direction: column; overflow-y: auto; }
-  .map-area { flex: none; height: 62vh; }
-  .sounding-panel { width: auto; border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  /* The map leaves a strip of the panel showing, so there is something to see and to drag: a finger on the
+     map pans the map, and the header and time bar above it can take half a phone screen. */
+  .map-area { flex: none; height: calc(100% - 64px); min-height: 240px; }
+  .only-narrow { display: inline-flex !important; }
+  /* At least a screenful, so the panel can be brought to the top while its sounding is still loading. */
+  .sounding-panel { width: auto; min-height: 100%; border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
   .sounding-panel > .skewt-wrap { flex: none; height: 400px; }
   .valid-time { min-width: 0; }
   .header .title p, .header-right .logo { display: none; }

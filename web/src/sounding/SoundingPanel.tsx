@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../state/store';
 import { formatUtc, validDate } from '../time/times';
 import { applyEdit, resetSounding } from './controller';
@@ -8,6 +8,9 @@ import { profilesEqual } from './profile';
 import { SkewT } from './SkewT';
 import { soundingStats } from './stats';
 import { PointSeries } from './PointSeries';
+
+/** Matches the narrow-screen rule in theme.css, where the panel sits below the map. */
+const NARROW = '(max-width: 900px)';
 
 const fmt = (v: number, digits = 0, unit = '') => (Number.isNaN(v) ? '–' : `${v.toFixed(digits)}${unit}`);
 
@@ -19,6 +22,23 @@ export function SoundingPanel() {
   const lockRh = useApp((s) => s.lockRh);
   const set = useApp((s) => s.set);
   const setPoint = useApp((s) => s.setPoint);
+  const point = useApp((s) => s.point);
+  const panel = useRef<HTMLElement>(null);
+  const lastPoint = useRef(point);
+
+  // On a phone the panel is below the map and mostly off the screen, so a tap on the map would seem to do
+  // nothing. Bring the panel into view whenever a point is chosen, including one that came with the address.
+  useEffect(() => {
+    const changed = point !== lastPoint.current;
+    lastPoint.current = point;
+    const scroller = panel.current?.parentElement;
+    // Only the area under the time bar scrolls; scrollIntoView would also nudge the whole page. The jump is
+    // immediate: an animated scroll was dropped when the sounding arrived and changed the panel's height.
+    if (changed && point && panel.current && scroller && window.matchMedia(NARROW).matches) {
+      scroller.scrollTo({ top: panel.current.offsetTop - scroller.offsetTop });
+    }
+  }, [point]);
+  const backToMap = () => panel.current?.parentElement?.scrollTo({ top: 0 });
 
   const { current, original } = sounding;
   const modified = !!current && !!original && !profilesEqual(current, original);
@@ -26,7 +46,7 @@ export function SoundingPanel() {
   const edit = { sigma: editSigma, lockRh };
 
   return (
-    <aside className="sounding-panel" aria-label="Sounding at the selected point">
+    <aside ref={panel} className="sounding-panel" aria-label="Sounding at the selected point">
       <div className="panel-head">
         <div>
           <h2>Sounding</h2>
@@ -38,7 +58,10 @@ export function SoundingPanel() {
           )}
         </div>
         {sounding.status !== 'idle' && (
-          <button type="button" className="btn btn-ghost small" onClick={() => setPoint(null)}>Close</button>
+          <div className="panel-actions">
+            <button type="button" className="btn btn-ghost small only-narrow" onClick={backToMap}>Back to map</button>
+            <button type="button" className="btn btn-ghost small" onClick={() => setPoint(null)}>Close</button>
+          </div>
         )}
       </div>
 
